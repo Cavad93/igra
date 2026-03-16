@@ -711,6 +711,31 @@ class SenateManager {
         materialized_reason: 'fallback',
       });
     }
+
+    // Blood_Feud: при первой материализации генерируем личную реплику
+    if (
+      this.nationId === GAME_STATE.player_nation &&
+      (senator.hidden_interests ?? []).includes('Blood_Feud') &&
+      !senator._blood_feud_dialogue &&
+      typeof generateBloodFeudDialogueViaLLM === 'function'
+    ) {
+      const clan        = this.clans[senator.clan_id];
+      const victims     = (clan?.blood_feud_victims ?? []).map(v => v.name);
+      const nation      = GAME_STATE.nations[this.nationId];
+      const lawsAfter   = (nation.active_laws ?? [])
+        .filter(l => !l.turn || l.turn >= (clan?.blood_feud_since ?? 0))
+        .slice(-3)
+        .map(l => l.name ?? l.id ?? '?');
+      generateBloodFeudDialogueViaLLM(senator, this._clanName(senator.clan_id), victims, lawsAfter)
+        .then(text => {
+          if (text) senator._blood_feud_dialogue = text;
+        })
+        .catch(() => {
+          senator._blood_feud_dialogue =
+            `Ты убил наших, Консул. Клан ${this._clanName(senator.clan_id)} помнит.`;
+        });
+    }
+
     return senator;
   }
 

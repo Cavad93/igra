@@ -63,7 +63,7 @@ class ConstitutionalEngine {
     const state = this._getState(nationId);
     state.tyranny_points = Math.min(200, state.tyranny_points + points);
 
-    if (state.tyranny_points >= 80 && !state.conspiracy) {
+    if (state.tyranny_points >= 80) {
       this.initiate_conspiracy(nationId);
     }
   }
@@ -371,47 +371,12 @@ class ConstitutionalEngine {
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // ЗАГОВОР
+  // ЗАГОВОР — делегируем ConspiracyEngine
   // ══════════════════════════════════════════════════════════════════
 
   initiate_conspiracy(nationId) {
-    const mgr   = getSenateManager(nationId);
-    const state = this._getState(nationId);
-    if (!mgr) return null;
-    if (state.conspiracy) return state.conspiracy; // уже активен
-
-    // Лидер: наиболее влиятельный + нелояльный (НЕ исторические имена — из текущей БД)
-    const candidates = mgr.senators
-      .filter(s => s.loyalty_score < 45)
-      .sort((a, b) => {
-        const score = s =>
-          (s.influence ?? s.ambition_level * 10) + (100 - s.loyalty_score);
-        return score(b) - score(a);
-      });
-
-    const leader = candidates[0] ?? mgr.senators
-      .slice()
-      .sort((a, b) => a.loyalty_score - b.loyalty_score)[0];
-
-    if (!leader) return null;
-
-    const leaderName = leader.name ?? `[${mgr._clanName(leader.clan_id)}]`;
-    const clanName   = mgr._clanName(leader.clan_id);
-
-    state.conspiracy = {
-      leader_id:    leader.id,
-      leader_name:  leaderName,
-      clan:         clanName,
-      strength:     Math.min(100, (100 - leader.loyalty_score) + leader.ambition_level * 10),
-      turn_started: GAME_STATE.turn,
-    };
-
-    addEventLog(
-      `🗡️ ЗАГОВОР! ${leaderName} (${clanName}) организует оппозицию Консулу. Сила заговора: ${state.conspiracy.strength}/100. Тирания: ${state.tyranny_points}.`,
-      'danger'
-    );
-
-    return state.conspiracy;
+    // Принудительный запуск через ConspiracyEngine (tyranny ≥ 80)
+    return CONSPIRACY_ENGINE.check_conspiracy_trigger(nationId, { forced: true });
   }
 
   // ══════════════════════════════════════════════════════════════════

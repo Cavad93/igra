@@ -339,6 +339,46 @@ async function generateConstitutionalChronicleViaLLM(ctx) {
 }
 
 // ──────────────────────────────────────────────────────────────
+// МАНИФЕСТ ЗАГОВОРА — LLM генерирует имя, цель и текст
+// ──────────────────────────────────────────────────────────────
+// Вызывается из ConspiracyEngine._generateManifest() (async, fire-and-forget).
+// Возвращает { name, goal, manifesto, symbol } или null при ошибке.
+async function generateConspiracyManifestViaLLM(ctx) {
+  try {
+    const { system, user } = PROMPTS.conspiracyManifest(ctx);
+    const raw = await callClaude(system, user, 350, CONFIG.MODEL_HAIKU);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    return JSON.parse(match[0]);
+  } catch (err) {
+    console.warn('conspiracyManifest LLM error:', err.message);
+    // Детерминированный fallback
+    return {
+      name:      `Тайный Союз ${ctx.leader_clan}`,
+      goal:      `Отстранить Консула и вернуть полномочия Сенату`,
+      manifesto: `Мы, граждане Сиракуз, не потерпим тирании. Консул нарушил древние права. Союз ${ctx.leader_clan} встанет на защиту свободы.`,
+      symbol:    '🌑',
+    };
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// ДИАЛОГ BLOOD_FEUD — реплика сенатора при материализации
+// ──────────────────────────────────────────────────────────────
+// Вызывается из materialize_senator если senator.hidden_interests содержит Blood_Feud.
+// Возвращает строку (plain text) или null.
+async function generateBloodFeudDialogueViaLLM(senator, clanName, victimNames, lawsAfterFeud) {
+  try {
+    const { system, user } = PROMPTS.bloodFeudDialogue(senator, clanName, victimNames, lawsAfterFeud);
+    const raw = await callClaude(system, user, 200, CONFIG.MODEL_HAIKU);
+    return raw.trim().replace(/\n+/g, ' ') || null;
+  } catch (err) {
+    console.warn('bloodFeudDialogue LLM error:', err.message);
+    return `Ты убил наших. Мой клан помнит, Консул. Придёт время — и мы напомним тебе.`;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
 // LAZY MATERIALIZATION — оживление сенатора
 // ──────────────────────────────────────────────────────────────
 
