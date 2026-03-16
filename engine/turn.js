@@ -359,10 +359,10 @@ function initGame() {
   }
 }
 
-// Рендерим всё разом
+// Рендерим всё разом — каждая функция изолирована, чтобы ошибка в одной не ломала остальные
 function renderAll() {
-  renderMap();
-  renderLeftPanel();
-  renderRightPanel();
-  updateDateDisplay();
+  try { renderMap(); }         catch (e) { console.error('renderMap error:', e); }
+  try { renderLeftPanel(); }   catch (e) { console.error('renderLeftPanel error:', e); }
+  try { renderRightPanel(); }  catch (e) { console.error('renderRightPanel error:', e); }
+  try { updateDateDisplay(); } catch (e) { console.error('updateDateDisplay error:', e); }
 }

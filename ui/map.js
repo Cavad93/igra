@@ -306,7 +306,25 @@ function refreshRegionStyles() {
 function renderMap() {
   if (!leafletMap) {
     // Первый вызов — инициализируем Leaflet
-    initLeafletMap();
+    if (typeof L === 'undefined') {
+      console.error('Leaflet не загружен. Проверьте интернет-соединение.');
+      const container = document.getElementById('map-container');
+      if (container) {
+        container.style.background = '#0d2e52';
+        container.innerHTML = '<div style="color:#d4a853;padding:20px;text-align:center;padding-top:40px">⚠ Карта недоступна — нет подключения к интернету.<br>Загрузка Leaflet не удалась.</div>';
+      }
+      return;
+    }
+    // requestAnimationFrame гарантирует, что контейнер уже имеет размеры в DOM
+    requestAnimationFrame(() => {
+      try {
+        initLeafletMap();
+        // invalidateSize на случай если контейнер ещё не получил финальный размер
+        setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 100);
+      } catch (e) {
+        console.error('Leaflet init error:', e);
+      }
+    });
   } else {
     // Последующие вызовы — только обновляем стили
     refreshRegionStyles();
