@@ -65,6 +65,10 @@ function renderGovernmentTab(nation) {
   const senateBlock = renderSenateLazyBlock(GAME_STATE.player_nation);
   if (senateBlock) sections.push(senateBlock);
 
+  // 5.6. Конституционный строй (если есть state_architecture)
+  const arch = nation.senate_config?.state_architecture;
+  if (arch) sections.push(renderConstitutionBlock(arch, nation));
+
   // 6. Активные механики (только включённые)
   if (gov.elections?.enabled) {
     sections.push(renderElectionBlock(gov.elections));
@@ -391,10 +395,33 @@ function renderSuccessionBlock(succession, nation) {
 // ──────────────────────────────────────────────────────────────────────
 
 function renderConspiracyBlock(conspiracies, nation) {
-  const gov    = nation.government;
   const chance = Math.round(calculateConspiracyChance(nation) * 100);
   const riskColor = chance > 40 ? '#f44336' : chance > 20 ? '#FF9800' : '#4CAF50';
   const sp = conspiracies.secret_police;
+
+  // Активные (обнаруженные) заговоры из движка
+  const nationId = GAME_STATE.player_nation;
+  const activeConsp = (GAME_STATE.nations[nationId]?.conspiracies || [])
+    .filter(c => c.status === 'detected');
+
+  const detectedHtml = activeConsp.map(cons => {
+    const opts = CONSPIRACY_ENGINE.get_player_options(cons.id, nationId);
+    const optBtns = opts.map(opt => `
+      <button class="gov-consp-action-btn" onclick="resolveConspiracy('${cons.id}','${opt.id}')"
+        title="${opt.risk}">${opt.label}</button>
+    `).join('');
+    return `
+      <div class="gov-detected-conspiracy">
+        <div class="gov-consp-header">
+          ⚠️ <strong>${cons.secret_name || 'Неизвестный заговор'}</strong>
+          <span class="gov-consp-stage">обнаружен</span>
+        </div>
+        <div class="gov-consp-desc dim">${cons.goal_description || 'Свергнуть действующую власть'}</div>
+        <div class="gov-consp-members dim">Участников: ~${cons.members?.length ?? '?'} сенаторов</div>
+        <div class="gov-consp-actions">${optBtns}</div>
+      </div>
+    `;
+  }).join('');
 
   return `
     <div class="gov-section">
@@ -406,8 +433,9 @@ function renderConspiracyBlock(conspiracies, nation) {
       </div>
       ${sp
         ? `<div class="gov-sp-row ${sp.enabled ? 'active' : 'inactive'}">
-            🕵️ Тайная полиция: ${sp.enabled ? `<span class="positive">активна (−${sp.cost_per_turn} монет/ход, −${Math.round(sp.conspiracy_detection_bonus*100)}% риска)</span>`
-                                               : '<span class="dim">неактивна</span>'}
+            🕵️ Тайная полиция: ${sp.enabled
+              ? `<span class="positive">активна (−${sp.cost_per_turn} монет/ход, −${Math.round(sp.conspiracy_detection_bonus*100)}% риска)</span>`
+              : '<span class="dim">неактивна</span>'}
             ${!sp.enabled
               ? `<button class="gov-sp-btn" onclick="enableSecretPolice()">Активировать (${sp.cost_per_turn} монет/ход)</button>`
               : `<button class="gov-sp-btn red" onclick="disableSecretPolice()">Расформировать</button>`
@@ -415,8 +443,16 @@ function renderConspiracyBlock(conspiracies, nation) {
           </div>`
         : ''
       }
+      ${detectedHtml || ''}
     </div>
   `;
+}
+
+async function resolveConspiracy(conspiracyId, outcome) {
+  const nationId = GAME_STATE.player_nation;
+  const result = await CONSPIRACY_ENGINE.resolve_conspiracy(nationId, conspiracyId, outcome);
+  renderGovernmentOverlay();
+  renderRightPanel();
 }
 
 function enableSecretPolice() {
@@ -537,6 +573,111 @@ async function submitGovernmentReform() {
       status.textContent = `❌ Ошибка: ${err.message}`;
     }
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 5.6. КОНСТИТУЦИОННЫЙ СТРОЙ
+// ──────────────────────────────────────────────────────────────────────
+
+function renderConstitutionBlock(arch, nation) {
+  const votingLabels = { Plutocracy: 'Плутократия', Meritocracy: 'Меритократия', Democracy: 'Демократия' };
+  const powerLabels  = { Limited: 'Ограниченные', Standard: 'Стандартные', Dictatorial: 'Диктаторские' };
+  return `
+    <div class="gov-section">
+      <div class="gov-section-title">📜 Конституция</div>
+      <div class="gov-constitution-grid">
+        <div class="gov-const-row"><span class="gov-metric-label">Мест в Сенате:</span><strong>${arch.senate_capacity}</strong></div>
+        <div class="gov-const-row"><span class="gov-metric-label">Срок консула:</span><strong>${arch.consul_term} лет</strong></div>
+        <div class="gov-const-row"><span class="gov-metric-label">Выборы каждые:</span><strong>${arch.election_cycle} лет</strong></div>
+        <div class="gov-const-row"><span class="gov-metric-label">Полномочия консула:</span><strong>${powerLabels[arch.consul_powers] ?? arch.consul_powers}</strong></div>
+        <div class="gov-const-row"><span class="gov-metric-label">Система голосования:</span><strong>${votingLabels[arch.voting_system] ?? arch.voting_system}</strong></div>
+        <div class="gov-const-row"><span class="gov-metric-label">Право вето народа:</span><strong>${arch.veto_rights ? '✅ Да' : '❌ Нет'}</strong></div>
+      </div>
+      <button class="gov-sp-btn" onclick="openConstitutionDialog()" style="margin-top:8px">⚖️ Изменить конституцию</button>
+    </div>
+  `;
+}
+
+function openConstitutionDialog() {
+  const nationId = GAME_STATE.player_nation;
+  const arch = GAME_STATE.nations[nationId]?.senate_config?.state_architecture;
+  if (!arch) return;
+
+  const existing = document.getElementById('constitution-dialog-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'constitution-dialog-overlay';
+  overlay.className = 'senate-law-overlay';
+  overlay.innerHTML = `
+    <div class="senate-law-form" style="max-width:460px">
+      <div class="slf-title">📜 Конституционные параметры</div>
+      <div class="slf-hint">Изменения вступят в силу немедленно. Радикальные изменения могут вызвать сопротивление сенаторов.</div>
+
+      <label class="slf-label">Мест в Сенате (90–600)
+        <input type="number" id="cd-senate-capacity" class="slf-input" min="90" max="600" value="${arch.senate_capacity}">
+      </label>
+      <label class="slf-label">Срок консула (лет, 1–10)
+        <input type="number" id="cd-consul-term" class="slf-input" min="1" max="10" value="${arch.consul_term}">
+      </label>
+      <label class="slf-label">Цикл выборов (лет, 1–20)
+        <input type="number" id="cd-election-cycle" class="slf-input" min="1" max="20" value="${arch.election_cycle}">
+      </label>
+      <label class="slf-label">Полномочия консула
+        <select id="cd-consul-powers" class="slf-select">
+          <option value="Limited"      ${arch.consul_powers==='Limited'      ? 'selected' : ''}>Ограниченные</option>
+          <option value="Standard"     ${arch.consul_powers==='Standard'     ? 'selected' : ''}>Стандартные</option>
+          <option value="Dictatorial"  ${arch.consul_powers==='Dictatorial'  ? 'selected' : ''}>Диктаторские</option>
+        </select>
+      </label>
+      <label class="slf-label">Система голосования
+        <select id="cd-voting-system" class="slf-select">
+          <option value="Plutocracy"   ${arch.voting_system==='Plutocracy'   ? 'selected' : ''}>Плутократия</option>
+          <option value="Meritocracy"  ${arch.voting_system==='Meritocracy'  ? 'selected' : ''}>Меритократия</option>
+          <option value="Democracy"    ${arch.voting_system==='Democracy'    ? 'selected' : ''}>Демократия</option>
+        </select>
+      </label>
+      <label class="slf-label" style="flex-direction:row;align-items:center;gap:8px">
+        <input type="checkbox" id="cd-veto-rights" ${arch.veto_rights ? 'checked' : ''}>
+        Право вето народного трибуна
+      </label>
+
+      <div class="slf-buttons">
+        <button class="slf-btn-submit" onclick="applyConstitutionChanges()">Применить</button>
+        <button class="slf-btn-cancel" onclick="document.getElementById('constitution-dialog-overlay').remove()">Отмена</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+function applyConstitutionChanges() {
+  const nationId = GAME_STATE.player_nation;
+  const arch = GAME_STATE.nations[nationId]?.senate_config?.state_architecture;
+  if (!arch) return;
+
+  const cap   = parseInt(document.getElementById('cd-senate-capacity')?.value) || arch.senate_capacity;
+  const term  = parseInt(document.getElementById('cd-consul-term')?.value)     || arch.consul_term;
+  const cycle = parseInt(document.getElementById('cd-election-cycle')?.value)  || arch.election_cycle;
+  const cpow  = document.getElementById('cd-consul-powers')?.value             || arch.consul_powers;
+  const vsys  = document.getElementById('cd-voting-system')?.value             || arch.voting_system;
+  const veto  = document.getElementById('cd-veto-rights')?.checked ?? arch.veto_rights;
+
+  const changes = [];
+  if (cap   !== arch.senate_capacity) { arch.senate_capacity = Math.max(90, Math.min(600, cap)); changes.push(`Мест в Сенате: ${arch.senate_capacity}`); }
+  if (term  !== arch.consul_term)     { arch.consul_term     = Math.max(1,  Math.min(10, term)); changes.push(`Срок консула: ${arch.consul_term} лет`); }
+  if (cycle !== arch.election_cycle)  { arch.election_cycle  = Math.max(1,  Math.min(20, cycle)); changes.push(`Цикл выборов: ${arch.election_cycle} лет`); }
+  if (cpow  !== arch.consul_powers)   { arch.consul_powers   = cpow;  changes.push(`Полномочия: ${cpow}`); }
+  if (vsys  !== arch.voting_system)   { arch.voting_system   = vsys;  changes.push(`Голосование: ${vsys}`); }
+  if (veto  !== arch.veto_rights)     { arch.veto_rights     = veto;  changes.push(`Вето: ${veto ? 'Да' : 'Нет'}`); }
+
+  if (changes.length) {
+    addEventLog(`📜 Конституционные изменения: ${changes.join('; ')}.`, 'law');
+  }
+
+  document.getElementById('constitution-dialog-overlay')?.remove();
+  renderGovernmentOverlay();
 }
 
 // ──────────────────────────────────────────────────────────────────────

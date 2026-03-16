@@ -81,21 +81,23 @@ ${JSON.stringify(politicalContext, null, 2)}
   // ──────────────────────────────────────────────────────────
   // 3. РЕШЕНИЕ AI-НАЦИИ
   // ──────────────────────────────────────────────────────────
-  nationDecision: (nationId, nationState, neighborsSummary, availableActions) => ({
+  nationDecision: (nationId, nationState, neighborsSummary, availableActions, recentDecisions = []) => ({
     system: `Ты — правитель ${nationState.name} в 301 BC.
 Принимаешь решение исходя из интересов своего государства.
 Отвечай ТОЛЬКО JSON. Никакого текста кроме JSON.
 Личность правителя: ${nationState.ai_personality || 'нейтральный'}.
-Приоритет: ${nationState.ai_priority || 'выживание'}.`,
+Приоритет: ${nationState.ai_priority || 'выживание'}.
+Избегай бездумного повторения одних и тех же действий несколько ходов подряд.`,
 
-    user: `ТВОЁ ГОСУДАРСТВО:
-${JSON.stringify(nationState, null, 2)}
+    user: `ТВОЁ ГОСУДАРСТВО (ключевые метрики):
+Казна: ${nationState.economy?.treasury ?? '?'} | Армия: ${(nationState.military?.infantry ?? 0) + (nationState.military?.cavalry ?? 0) * 3} | Счастье: ${nationState.population?.happiness ?? '?'}%
 
-СОСЕДИ И ОБСТАНОВКА:
+СОСЕДИ:
 ${JSON.stringify(neighborsSummary, null, 2)}
 
 ДОСТУПНЫЕ ДЕЙСТВИЯ:
 ${JSON.stringify(availableActions, null, 2)}
+${recentDecisions.length ? `\nПОСЛЕДНИЕ РЕШЕНИЯ (не повторяй без причины):\n${recentDecisions.map(d => `Ход ${d.turn}: ${d.action}${d.target ? ' → ' + d.target : ''} (${d.reasoning})`).join('\n')}` : ''}
 
 Выбери одно действие и верни JSON:
 {
@@ -335,33 +337,6 @@ ${ctx.opponent_name ? `Главный противник: ${ctx.opponent_name} (
 Настроение Сената: «${ctx.senate_mood}».
 
 Опиши реакцию Форума, народа и Сената на это событие. Упомяни клан оппонента если он есть.`,
-  }),
-
-  // ──────────────────────────────────────────────────────────
-  // 9. ГЕНЕРАЦИЯ СЛУЧАЙНОГО СОБЫТИЯ (расширенная версия)
-  // ──────────────────────────────────────────────────────────
-  generateEvent: (gameStateSlice, recentHistory) => ({
-    system: `Ты — генератор исторических событий для стратегии 301 BC.
-Создаёшь правдоподобные события исходя из текущей обстановки.
-Отвечай ТОЛЬКО JSON.`,
-
-    user: `ТЕКУЩАЯ ОБСТАНОВКА:
-${JSON.stringify(gameStateSlice, null, 2)}
-
-ПОСЛЕДНИЕ СОБЫТИЯ:
-${recentHistory.slice(0, 5).map(e => e.message).join('\n')}
-
-Создай одно исторически правдоподобное событие.
-{
-  "title": "Название события",
-  "description": "Описание (2-3 предложения)",
-  "type": "diplomacy|economy|military|character|natural|political",
-  "effects": {
-    "path.to.change": число_изменения
-  },
-  "requires_player_choice": false,
-  "choices": null
-}`,
   }),
 
   // ──────────────────────────────────────────────────────────

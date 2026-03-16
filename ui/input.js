@@ -885,6 +885,9 @@ function finalizeDebateVote(nationId, lawJson, votesFor, votesAgainst, votesAbst
     addEventLog(`Закон "${law.name}" отклонён Сенатом. За: ${votesFor}, Против: ${votesAgainst}.`, 'law');
   }
 
+  // Синхронизируем faction seats обратно в senate_config (могли измениться через AI-изменения)
+  if (typeof syncSenateConfigFromManager === 'function') syncSenateConfigFromManager(nationId);
+
   renderAll();
 }
 

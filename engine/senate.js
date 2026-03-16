@@ -1254,3 +1254,21 @@ function initAllSenates() {
     initSenateForNation(nationId);
   }
 }
+
+// Синхронизирует faction.seats из SenateManager обратно в senate_config.factions
+// Вызывается после голосований, которые могут изменить состав сената
+function syncSenateConfigFromManager(nationId) {
+  const mgr    = getSenateManager(nationId);
+  const nation = GAME_STATE.nations[nationId];
+  if (!mgr || !nation?.senate_config?.factions) return;
+
+  for (const cfgFaction of nation.senate_config.factions) {
+    const mgrFaction = mgr.factions.find(f => f.id === cfgFaction.id);
+    if (mgrFaction) {
+      cfgFaction.seats = mgr.senators.filter(s => s.faction_id === cfgFaction.id).length;
+    }
+  }
+
+  // Обновляем total_seats
+  nation.senate_config.total_seats = mgr.senators.length;
+}

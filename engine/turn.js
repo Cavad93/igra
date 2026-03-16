@@ -38,8 +38,10 @@ async function processTurn() {
     // 1.6. Конституционный движок — тирания, гражданская война
     CONSTITUTIONAL_ENGINE.tick(GAME_STATE.player_nation);
 
-    // 1.7. Движок заговоров — инкубация, вербовка, Час Икс
-    await CONSPIRACY_ENGINE.tick(GAME_STATE.player_nation);
+    // 1.7. Движок заговоров — инкубация, вербовка, Час Икс (для всех наций)
+    for (const _conspNationId of Object.keys(GAME_STATE.nations)) {
+      await CONSPIRACY_ENGINE.tick(_conspNationId);
+    }
 
     // 2. Население (детерминировано)
     updatePopulationGrowth();
@@ -176,6 +178,7 @@ function maybeSpawnCharacter() {
 
 async function processAINations() {
   const promises = [];
+  const pendingNationIds = [];
 
   for (const [nationId, nation] of Object.entries(GAME_STATE.nations)) {
     // Пропускаем игрока и малые нации без AI
@@ -184,6 +187,7 @@ async function processAINations() {
 
     // Каждые 3 хода AI нации принимают решение
     if (GAME_STATE.turn % 3 === 0) {
+      pendingNationIds.push(nationId);
       promises.push(
         getAINationDecision(nationId).catch(err => {
           // При ошибке — детерминированное fallback решение
@@ -194,8 +198,22 @@ async function processAINations() {
     }
   }
 
-  // Ждём все AI решения параллельно
-  await Promise.all(promises);
+  if (promises.length === 0) return;
+
+  // Таймаут 15 секунд — если AI не отвечает, применяем fallback
+  const timeoutId = { fired: false };
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => { timeoutId.fired = true; reject(new Error('AI timeout')); }, 15000)
+  );
+
+  try {
+    await Promise.race([Promise.all(promises), timeoutPromise]);
+  } catch (err) {
+    if (timeoutId.fired) {
+      console.warn('processAINations: таймаут 15с, применяем fallback для всех');
+      for (const nId of pendingNationIds) applyFallbackDecision(nId);
+    }
+  }
 }
 
 // Детерминированное решение при недоступности AI
@@ -489,6 +507,11 @@ function initGame() {
   const endTurnBtn = document.getElementById('end-turn-btn');
   if (endTurnBtn) {
     endTurnBtn.addEventListener('click', processTurn);
+  }
+
+  // Инициализируем сенаты для новой игры (при загрузке сенаты восстанавливаются из сохранения)
+  if (!hasSave && typeof initAllSenates === 'function') {
+    initAllSenates();
   }
 }
 

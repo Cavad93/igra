@@ -204,13 +204,26 @@ async function getAINationDecision(nationId) {
   // Список доступных действий
   const availableActions = buildAvailableActions(nationId, nation);
 
-  const prompt = PROMPTS.nationDecision(nationId, nation, neighborsSummary, availableActions);
+  // Краткосрочная память: последние 3 решения
+  const recentDecisions = (nation.recent_decisions || []).slice(-3);
+
+  const prompt = PROMPTS.nationDecision(nationId, nation, neighborsSummary, availableActions, recentDecisions);
 
   const rawResponse = await callClaude(prompt.system, prompt.user, 300, CONFIG.MODEL_SONNET);
   const decision = parseAIResponse(rawResponse);
 
   if (validateNationDecision(decision)) {
     applyNationDecision(nationId, decision);
+
+    // Сохраняем решение в краткосрочную память (последние 3 хода)
+    if (!nation.recent_decisions) nation.recent_decisions = [];
+    nation.recent_decisions.push({
+      turn:      GAME_STATE.turn,
+      action:    decision.action,
+      target:    decision.target ?? null,
+      reasoning: (decision.reasoning ?? '').slice(0, 80),
+    });
+    if (nation.recent_decisions.length > 3) nation.recent_decisions.shift();
   }
 }
 
@@ -289,6 +302,31 @@ async function generateNewCharacter(nationId) {
     const newChar = validated[0];
     nation.characters.push(newChar);
     addEventLog(`При дворе появился новый человек: ${newChar.name} (${getRoleLabel(newChar.role)}).`, 'character');
+
+    // Синхронизируем с SenateManager: сенаторы получают место в сенате
+    if (newChar.role === 'senator' && newChar.senate_faction_id) {
+      const mgr = getSenateManager(nationId);
+      if (mgr) {
+        // Ищем незанятое место в нужной фракции и привязываем персонажа
+        const ghost = mgr.senators.find(
+          s => s.faction_id === newChar.senate_faction_id && !s.materialized && !s.character_id
+        );
+        if (ghost) {
+          ghost.character_id  = newChar.id;
+          ghost.name          = newChar.name;
+          ghost.materialized  = true;
+          ghost.loyalty_score = newChar.loyalty ?? ghost.loyalty_score;
+        } else {
+          // Нет свободного места — добавляем новый призрак сверх лимита
+          const extra = mgr._createGhost(newChar.senate_faction_id);
+          extra.character_id = newChar.id;
+          extra.name         = newChar.name;
+          extra.materialized = true;
+          mgr.senators.push(extra);
+        }
+      }
+    }
+
     renderRightPanel();
   }
 }
