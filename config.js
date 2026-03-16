@@ -61,4 +61,13 @@ const CONFIG = {
 
   // Шанс случайного события за ход
   RANDOM_EVENT_CHANCE: 0.10,
+
+  // ─────────────────────────────────────
+  // КАРТА — тайловый сервер
+  // ─────────────────────────────────────
+  // CAWM (Consortium of Ancient World Mappers, ун-т Айовы)
+  // Преемник AWMC. Лицензия: CC BY 4.0
+  // Сайт: https://cawm.lib.uiowa.edu
+  MAP_TILE_URL: 'https://cawm.lib.uiowa.edu/tiles/{z}/{x}/{y}.png',
+  MAP_TILE_ATTRIBUTION: '© <a href="https://cawm.lib.uiowa.edu/">CAWM</a> CC BY 4.0',
 };

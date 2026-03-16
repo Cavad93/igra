@@ -1,140 +1,147 @@
-// SVG карта — рендер и обработка кликов
+// Карта на Leaflet.js + тайлы CAWM (Ancient World Mapping Center)
+// Тайлы: https://cawm.lib.uiowa.edu — CC BY 4.0
+// Координаты в формате Leaflet [lat, lng]
 
-let selectedRegion = null;
+let leafletMap = null;          // экземпляр L.Map
+let regionLayers = {};          // { regionId: L.Polygon }
+let selectedRegionId = null;
 
 // ──────────────────────────────────────────────────────────────
-// ОТРИСОВКА КАРТЫ
+// ИНИЦИАЛИЗАЦИЯ КАРТЫ
 // ──────────────────────────────────────────────────────────────
 
-function renderMap() {
-  const svg = document.getElementById('game-map');
-  if (!svg) return;
+function initLeafletMap() {
+  const container = document.getElementById('map-container');
+  if (!container) return;
 
-  // Очищаем карту
-  svg.innerHTML = '';
-
-  // Фон — море
-  const seaBg = createSVGEl('rect', {
-    width: '100%', height: '100%',
-    fill: 'url(#seaGradient)',
+  // Карта центрируется на Средиземноморье
+  leafletMap = L.map('map-container', {
+    center: [37.5, 18.0],
+    zoom: 5,
+    minZoom: 3,
+    maxZoom: 8,
+    zoomControl: false,          // кастомное размещение
+    attributionControl: false,   // добавим свою атрибуцию
   });
-  svg.appendChild(seaBg);
 
-  // Определения (градиенты, фильтры)
-  svg.appendChild(buildDefs());
+  // Кнопки зума — помещаем в правый нижний угол
+  L.control.zoom({ position: 'bottomright' }).addTo(leafletMap);
 
-  // Рисуем континентальные фоны
-  for (const continent of MAP_CONTINENTS) {
-    const poly = createSVGEl('polygon', {
-      points: continent.points,
-      fill: '#C4A882',
-      stroke: '#A08060',
-      'stroke-width': '0.5',
-      opacity: '0.85',
-      class: 'continent-bg',
-      id: `continent-${continent.id}`,
-    });
-    svg.appendChild(poly);
-  }
+  // Атрибуция
+  L.control.attribution({
+    position: 'bottomleft',
+    prefix: false,
+  }).addAttribution(
+    '© <a href="https://cawm.lib.uiowa.edu/" target="_blank">CAWM</a> · CC BY 4.0'
+  ).addTo(leafletMap);
 
-  // Рисуем регионы
-  for (const [regionId, regionData] of Object.entries(MAP_REGIONS)) {
-    renderRegion(svg, regionId, regionData);
-  }
+  // Базовый слой — тайлы древнего мира CAWM
+  addBaseTileLayer();
+
+  // Регионы
+  renderRegionPolygons();
 
   // Подписи морей
-  for (const label of SEA_LABELS) {
-    const text = createSVGEl('text', {
-      x: label.x,
-      y: label.y,
-      'font-size': label.fontSize || 9,
-      'font-family': 'serif',
-      fill: 'rgba(200,230,255,0.45)',
-      'text-anchor': 'middle',
-      'font-style': 'italic',
-      'pointer-events': 'none',
-      'letter-spacing': '1.5',
-    });
-    text.textContent = label.text;
-    svg.appendChild(text);
-  }
-
-  // Подписи регионов
-  for (const [regionId, regionData] of Object.entries(MAP_REGIONS)) {
-    renderRegionLabel(svg, regionId, regionData);
-  }
+  renderSeaLabels();
 }
 
 // ──────────────────────────────────────────────────────────────
-// ОДИН РЕГИОН
+// ТАЙЛОВЫЙ СЛОЙ
 // ──────────────────────────────────────────────────────────────
 
-function renderRegion(svg, regionId, regionData) {
-  const gameRegion = GAME_STATE.regions[regionId];
-  const nationId = gameRegion ? gameRegion.nation : regionData.nation;
+function addBaseTileLayer() {
+  const cawmUrl = CONFIG.MAP_TILE_URL || 'https://cawm.lib.uiowa.edu/tiles/{z}/{x}/{y}.png';
+
+  const tileLayer = L.tileLayer(cawmUrl, {
+    attribution: '© CAWM · CC BY 4.0',
+    maxZoom: 8,
+    minZoom: 3,
+    tileSize: 256,
+    // Тонкий тёмный оверлей для соответствия игровому стилю
+    opacity: 1.0,
+    crossOrigin: true,
+    errorTileUrl: '',
+  });
+
+  tileLayer.on('tileerror', () => {
+    // При ошибке загрузки тайлов — тихо fallback
+    console.warn('Тайлы CAWM недоступны. Проверьте подключение к интернету.');
+  });
+
+  tileLayer.addTo(leafletMap);
+
+  // Тёмный полупрозрачный оверлей для игровой атмосферы
+  // (подчёркивает цвета регионов, не мешает читабельности)
+  L.tileLayer(cawmUrl, {
+    attribution: '',
+    maxZoom: 8,
+    opacity: 0,        // выключен по умолчанию — можно включить
+  });
+}
+
+// ──────────────────────────────────────────────────────────────
+// РЕГИОНЫ
+// ──────────────────────────────────────────────────────────────
+
+function renderRegionPolygons() {
+  // Удаляем старые слои
+  for (const layer of Object.values(regionLayers)) {
+    if (leafletMap.hasLayer(layer)) leafletMap.removeLayer(layer);
+  }
+  regionLayers = {};
+
+  for (const [regionId, mapData] of Object.entries(MAP_REGIONS)) {
+    if (!mapData.coords || mapData.coords.length < 3) continue;
+
+    const gameRegion = GAME_STATE.regions[regionId];
+    const nationId = gameRegion ? gameRegion.nation : mapData.nation;
+    const nation = GAME_STATE.nations[nationId];
+    const color = nation ? nation.color : '#9E9E9E';
+    const isPlayerRegion = (nationId === GAME_STATE.player_nation);
+    const isSelected = (selectedRegionId === regionId);
+
+    const polygon = L.polygon(mapData.coords, buildPolygonStyle(color, isPlayerRegion, isSelected));
+
+    // События
+    polygon.on('click',      () => onRegionClick(regionId));
+    polygon.on('mouseover',  (e) => onRegionHover(e, regionId, true,  color, isPlayerRegion));
+    polygon.on('mouseout',   (e) => onRegionHover(e, regionId, false, color, isPlayerRegion));
+
+    polygon.bindTooltip(buildTooltipContent(regionId, mapData, nationId), {
+      className:  'region-tooltip',
+      direction:  'top',
+      offset:     [0, -4],
+      opacity:    0.95,
+    });
+
+    polygon.addTo(leafletMap);
+    regionLayers[regionId] = polygon;
+  }
+}
+
+function buildPolygonStyle(color, isPlayerRegion, isSelected) {
+  return {
+    color:        isSelected      ? '#FFD700' : isPlayerRegion ? '#D4A853' : 'rgba(0,0,0,0.55)',
+    weight:       isSelected      ? 3.0 : isPlayerRegion ? 2.0 : 0.8,
+    fillColor:    color,
+    fillOpacity:  isSelected      ? 0.55 : 0.38,
+    opacity:      1.0,
+    dashArray:    null,
+  };
+}
+
+function buildTooltipContent(regionId, mapData, nationId) {
   const nation = GAME_STATE.nations[nationId];
-
-  const baseColor = nation ? nation.color : '#9E9E9E';
-  const isSelected = (selectedRegion === regionId);
-  const isPlayerRegion = (nationId === GAME_STATE.player_nation);
-
-  // Цвет заливки — чуть светлее если выделен
-  let fillColor = baseColor;
-  if (isSelected) fillColor = lightenColor(baseColor, 40);
-
-  const poly = createSVGEl('polygon', {
-    points: regionData.polygon,
-    fill: fillColor,
-    stroke: isSelected ? '#FFD700' : isPlayerRegion ? '#D4A853' : '#000',
-    'stroke-width': isSelected ? '2.5' : isPlayerRegion ? '1.5' : '0.8',
-    opacity: '0.92',
-    class: `region ${isPlayerRegion ? 'player-region' : ''}`,
-    id: `region-${regionId}`,
-    'data-region': regionId,
-    style: 'cursor: pointer;',
-    filter: isSelected ? 'url(#regionGlow)' : '',
-  });
-
-  poly.addEventListener('click', () => onRegionClick(regionId));
-  poly.addEventListener('mouseenter', () => onRegionHover(regionId, true));
-  poly.addEventListener('mouseleave', () => onRegionHover(regionId, false));
-
-  svg.appendChild(poly);
-
-  // Иконка типа региона
-  if (regionData.label) {
-    const iconData = getRegionIcon(regionData.type);
-    const iconEl = createSVGEl('text', {
-      x: regionData.label.x,
-      y: regionData.label.y - 8,
-      'font-size': '10',
-      'text-anchor': 'middle',
-      'pointer-events': 'none',
-    });
-    iconEl.textContent = iconData;
-    svg.appendChild(iconEl);
-  }
-}
-
-function renderRegionLabel(svg, regionId, regionData) {
-  if (!regionData.label) return;
-
   const gameRegion = GAME_STATE.regions[regionId];
-  const isPlayer = gameRegion && gameRegion.nation === GAME_STATE.player_nation;
+  const nationName = nation ? nation.name : 'Независимые';
+  const nationColor = nation ? nation.color : '#9E9E9E';
+  const pop = gameRegion ? (gameRegion.population || 0).toLocaleString() : '?';
 
-  const text = createSVGEl('text', {
-    x: regionData.label.x,
-    y: regionData.label.y + 8,
-    'font-size': isPlayer ? '8.5' : '7.5',
-    'font-family': 'serif',
-    fill: '#FFF8E7',
-    'text-anchor': 'middle',
-    'pointer-events': 'none',
-    'font-weight': isPlayer ? 'bold' : 'normal',
-    'text-shadow': '1px 1px 2px rgba(0,0,0,0.8)',
-  });
-  text.textContent = regionData.name;
-  svg.appendChild(text);
+  return `
+    <div class="rt-name">${mapData.name}</div>
+    <div class="rt-nation" style="color:${nationColor}">${nationName}</div>
+    <div class="rt-pop">👥 ${pop}</div>
+  `;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -142,25 +149,60 @@ function renderRegionLabel(svg, regionId, regionData) {
 // ──────────────────────────────────────────────────────────────
 
 function onRegionClick(regionId) {
-  selectedRegion = regionId;
-  renderMap();  // перерисовываем с выделением
-  showRegionInfo(regionId);
-}
+  // Снимаем выделение с предыдущего
+  if (selectedRegionId && regionLayers[selectedRegionId]) {
+    const prev = GAME_STATE.regions[selectedRegionId];
+    const prevNationId = prev ? prev.nation : MAP_REGIONS[selectedRegionId]?.nation;
+    const prevNation = GAME_STATE.nations[prevNationId];
+    const prevColor = prevNation ? prevNation.color : '#9E9E9E';
+    const prevIsPlayer = (prevNationId === GAME_STATE.player_nation);
+    regionLayers[selectedRegionId].setStyle(buildPolygonStyle(prevColor, prevIsPlayer, false));
+  }
 
-function onRegionHover(regionId, entering) {
-  const poly = document.getElementById(`region-${regionId}`);
-  if (!poly) return;
+  if (selectedRegionId === regionId) {
+    // Клик по уже выбранному — снимаем выбор
+    selectedRegionId = null;
+    closeRegionInfo();
+    return;
+  }
 
-  if (entering && regionId !== selectedRegion) {
-    poly.setAttribute('fill', lightenColor(poly.getAttribute('fill'), 20));
-  } else if (!entering && regionId !== selectedRegion) {
-    // Восстанавливаем цвет — проще перерисовать
+  selectedRegionId = regionId;
+
+  // Выделяем новый регион
+  const layer = regionLayers[regionId];
+  if (layer) {
     const gameRegion = GAME_STATE.regions[regionId];
     const nationId = gameRegion ? gameRegion.nation : MAP_REGIONS[regionId]?.nation;
     const nation = GAME_STATE.nations[nationId];
-    if (nation) poly.setAttribute('fill', nation.color);
+    const color = nation ? nation.color : '#9E9E9E';
+    layer.setStyle(buildPolygonStyle(color, nationId === GAME_STATE.player_nation, true));
+    layer.bringToFront();
+  }
+
+  showRegionInfo(regionId);
+}
+
+function onRegionHover(e, regionId, entering, color, isPlayerRegion) {
+  if (regionId === selectedRegionId) return;
+
+  const layer = regionLayers[regionId];
+  if (!layer) return;
+
+  if (entering) {
+    layer.setStyle({
+      fillOpacity: 0.60,
+      weight: isPlayerRegion ? 2.5 : 1.5,
+      color: '#FFD700',
+    });
+    layer.bringToFront();
+  } else {
+    layer.setStyle(buildPolygonStyle(color, isPlayerRegion, false));
   }
 }
+
+// ──────────────────────────────────────────────────────────────
+// ИНФО-ПАНЕЛЬ РЕГИОНА
+// ──────────────────────────────────────────────────────────────
 
 function showRegionInfo(regionId) {
   const panel = document.getElementById('region-info');
@@ -172,17 +214,14 @@ function showRegionInfo(regionId) {
 
   const nationId = gameData.nation;
   const nation = GAME_STATE.nations[nationId];
-  const nationName = nation ? nation.name : 'Независимые';
+  const nationName  = nation ? nation.name  : 'Независимые';
   const nationColor = nation ? nation.color : '#9E9E9E';
 
-  // Строим список производства
-  const productionLines = Object.entries(gameData.production || {})
-    .map(([good, amount]) => {
-      const goodData = GOODS[good];
-      return `<span class="prod-item">${goodData ? goodData.icon : '📦'} ${goodData ? goodData.name : good}: ${Math.round(amount).toLocaleString()}</span>`;
-    }).join('');
+  const productionLines = Object.entries(gameData.production || {}).map(([good, amount]) => {
+    const g = GOODS[good];
+    return `<span class="prod-item">${g ? g.icon : '📦'} ${g ? g.name : good}: ${Math.round(amount).toLocaleString()}</span>`;
+  }).join('');
 
-  // Строим список зданий
   const buildings = (gameData.buildings || []).map(b =>
     `<span class="building-tag">🏛 ${b.replace(/_/g, ' ')}</span>`
   ).join('');
@@ -205,71 +244,81 @@ function showRegionInfo(regionId) {
       ${buildings ? `<div class="region-buildings"><div class="section-label">Постройки:</div>${buildings}</div>` : ''}
     </div>
   `;
+
   panel.classList.remove('hidden');
 }
 
 function closeRegionInfo() {
   const panel = document.getElementById('region-info');
-  if (panel) {
-    panel.classList.add('hidden');
-    selectedRegion = null;
-    renderMap();
+  if (panel) panel.classList.add('hidden');
+
+  if (selectedRegionId && regionLayers[selectedRegionId]) {
+    const gameRegion = GAME_STATE.regions[selectedRegionId];
+    const nationId = gameRegion ? gameRegion.nation : MAP_REGIONS[selectedRegionId]?.nation;
+    const nation = GAME_STATE.nations[nationId];
+    const color = nation ? nation.color : '#9E9E9E';
+    regionLayers[selectedRegionId].setStyle(
+      buildPolygonStyle(color, nationId === GAME_STATE.player_nation, false)
+    );
+  }
+  selectedRegionId = null;
+}
+
+// ──────────────────────────────────────────────────────────────
+// ПОДПИСИ МОРЕЙ
+// ──────────────────────────────────────────────────────────────
+
+function renderSeaLabels() {
+  for (const label of SEA_LABELS) {
+    const icon = L.divIcon({
+      className: 'sea-label',
+      html: `<div class="sea-label-text" style="font-size:${label.size || 11}px">${label.text}</div>`,
+      iconAnchor: [50, 10],
+      iconSize: [100, 24],
+    });
+    L.marker([label.lat, label.lng], { icon, interactive: false }).addTo(leafletMap);
   }
 }
 
 // ──────────────────────────────────────────────────────────────
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ЛЁГКОЕ ОБНОВЛЕНИЕ СТИЛЕЙ (без пересоздания слоёв)
 // ──────────────────────────────────────────────────────────────
 
-function createSVGEl(tag, attrs) {
-  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v !== '' && v !== undefined && v !== null) {
-      el.setAttribute(k, v);
-    }
+function refreshRegionStyles() {
+  for (const [regionId, layer] of Object.entries(regionLayers)) {
+    const gameRegion = GAME_STATE.regions[regionId];
+    const nationId = gameRegion ? gameRegion.nation : MAP_REGIONS[regionId]?.nation;
+    const nation = GAME_STATE.nations[nationId];
+    const color = nation ? nation.color : '#9E9E9E';
+    const isPlayer = (nationId === GAME_STATE.player_nation);
+    const isSelected = (regionId === selectedRegionId);
+    layer.setStyle(buildPolygonStyle(color, isPlayer, isSelected));
+
+    // Обновляем тултип
+    layer.setTooltipContent(buildTooltipContent(regionId, MAP_REGIONS[regionId], nationId));
   }
-  return el;
 }
 
-function buildDefs() {
-  const defs = createSVGEl('defs', {});
+// ──────────────────────────────────────────────────────────────
+// ПУБЛИЧНАЯ ФУНКЦИЯ renderMap() — вызывается из turn.js
+// ──────────────────────────────────────────────────────────────
 
-  // Градиент моря
-  const seaGrad = createSVGEl('linearGradient', {
-    id: 'seaGradient', x1: '0', y1: '0', x2: '0', y2: '1',
-  });
-  const stop1 = createSVGEl('stop', { offset: '0%',   'stop-color': '#1a4a7a' });
-  const stop2 = createSVGEl('stop', { offset: '100%', 'stop-color': '#0d2e52' });
-  seaGrad.appendChild(stop1);
-  seaGrad.appendChild(stop2);
-  defs.appendChild(seaGrad);
+function renderMap() {
+  if (!leafletMap) {
+    // Первый вызов — инициализируем Leaflet
+    initLeafletMap();
+  } else {
+    // Последующие вызовы — только обновляем стили
+    refreshRegionStyles();
+  }
 
-  // Свечение выбранного региона
-  const glow = createSVGEl('filter', { id: 'regionGlow', x: '-20%', y: '-20%', width: '140%', height: '140%' });
-  const blur = createSVGEl('feGaussianBlur', { stdDeviation: '3', result: 'coloredBlur' });
-  const merge = createSVGEl('feMerge', {});
-  const m1 = createSVGEl('feMergeNode', { in: 'coloredBlur' });
-  const m2 = createSVGEl('feMergeNode', { in: 'SourceGraphic' });
-  merge.appendChild(m1);
-  merge.appendChild(m2);
-  glow.appendChild(blur);
-  glow.appendChild(merge);
-  defs.appendChild(glow);
-
-  return defs;
+  // Легенда наций (DOM вне Leaflet)
+  renderNationLegend && renderNationLegend();
 }
 
-function getRegionIcon(type) {
-  const icons = {
-    capital_city: '🏛',
-    coastal_city: '⚓',
-    city_state:   '🏺',
-    rural:        '🌾',
-    kingdom:      '👑',
-    fortress:     '🏰',
-  };
-  return icons[type] || '🗺';
-}
+// ──────────────────────────────────────────────────────────────
+// УТИЛИТЫ
+// ──────────────────────────────────────────────────────────────
 
 function getTerrainName(terrain) {
   const names = {
@@ -282,14 +331,13 @@ function getTerrainName(terrain) {
   return names[terrain] || terrain;
 }
 
-// Осветляет HEX цвет на amount (0-255)
 function lightenColor(hex, amount) {
   if (!hex || !hex.startsWith('#')) return hex;
   try {
-    let num = parseInt(hex.slice(1), 16);
-    let r = Math.min(255, (num >> 16) + amount);
-    let g = Math.min(255, ((num >> 8) & 0xff) + amount);
-    let b = Math.min(255, (num & 0xff) + amount);
+    const num = parseInt(hex.slice(1), 16);
+    const r = Math.min(255, (num >> 16) + amount);
+    const g = Math.min(255, ((num >> 8) & 0xff) + amount);
+    const b = Math.min(255, (num & 0xff) + amount);
     return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
   } catch {
     return hex;
