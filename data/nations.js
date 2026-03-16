@@ -25,7 +25,7 @@ const INITIAL_GAME_STATE = {
         legitimacy: 72,        // бывший гончар — знать его не любит
       },
 
-      regions: ['syracuse_city', 'leontini', 'akrai'],
+      regions: ['syracuse_city', 'leontini', 'gela', 'sicels'],
 
       population: {
         total: 82000,
@@ -194,7 +194,7 @@ const INITIAL_GAME_STATE = {
         legitimacy: 82,
       },
 
-      regions: ['carthage', 'numidia'],
+      regions: ['carthage', 'elymia', 'panormus', 'selinous'],
 
       population: {
         total: 350000,
@@ -502,7 +502,7 @@ const INITIAL_GAME_STATE = {
       flag_emoji: '🏳️',
       is_player: false,
       is_minor: true,
-      regions: ['messana'],
+      regions: ['messana', 'tyndaris', 'calactea', 'sicani', 'sicels', 'acragas'],
       government: { type: 'oligarchy', ruler: 'Городской совет', institutions: [], legitimacy: 50 },
       population: { total: 22000, by_profession: { farmers: 8000, craftsmen: 5000, merchants: 5000, sailors: 2000, clergy: 1000, soldiers: 500, slaves: 500 }, happiness: 58, growth_rate: 0.001 },
       economy: { treasury: 2800, income_per_turn: 0, expense_per_turn: 0, tax_rate: 0.10, stockpile: { wheat: 8000, fish: 2000 }, trade_routes: [] },
@@ -516,6 +516,7 @@ const INITIAL_GAME_STATE = {
   // РЕГИОНЫ — детали каждой территории
   // ─────────────────────────────────────────────
   regions: {
+    // ── Сиракузы ──────────────────────────────────────────
     syracuse_city: {
       nation: 'syracuse',
       type: 'capital_city',
@@ -536,16 +537,58 @@ const INITIAL_GAME_STATE = {
       production: { wheat: 12800, olives: 3200 },
       garrison: 500,
     },
-    akrai: {
+    gela: {
       nation: 'syracuse',
+      type: 'coastal_city',
+      terrain: 'coastal_city',
+      population: 18000,
+      fertility: 0.60,
+      buildings: ['порт', 'рынок'],
+      production: { fish: 2200, wheat: 4500, trade_goods: 1200 },
+      garrison: 600,
+    },
+    sicels: {
+      nation: 'neutral',
       type: 'rural',
       terrain: 'hills',
-      population: 18000,
+      population: 35000,
       fertility: 0.65,
-      buildings: ['укрепление', 'храм'],
-      production: { wheat: 5200, olives: 4800, wine: 2200 },
+      buildings: ['деревни'],
+      production: { wheat: 7500, timber: 3200, iron: 1500 },
       garrison: 800,
     },
+    // ── Карфагенские регионы Сицилии ──────────────────────
+    elymia: {
+      nation: 'carthage',
+      type: 'rural',
+      terrain: 'hills',
+      population: 28000,
+      fertility: 0.55,
+      buildings: ['крепость_эрикс', 'храм_афродиты'],
+      production: { wheat: 5500, olives: 3800, wine: 2200 },
+      garrison: 1500,
+    },
+    panormus: {
+      nation: 'carthage',
+      type: 'coastal_city',
+      terrain: 'coastal_city',
+      population: 45000,
+      fertility: 0.45,
+      buildings: ['карфагенский_порт', 'верфи', 'казармы'],
+      production: { fish: 3800, trade_goods: 4500, cloth: 2000 },
+      garrison: 4000,
+    },
+    selinous: {
+      nation: 'carthage',
+      type: 'rural',
+      terrain: 'plains',
+      population: 15000,
+      fertility: 0.70,
+      buildings: ['разрушенный_храм', 'поля'],
+      production: { wheat: 8500, olives: 2800 },
+      garrison: 800,
+    },
+    // ── Нейтральные регионы Сицилии ───────────────────────
     messana: {
       nation: 'neutral',
       type: 'coastal_city',
@@ -555,6 +598,46 @@ const INITIAL_GAME_STATE = {
       buildings: ['порт', 'укрепления'],
       production: { fish: 1800, trade_goods: 1500 },
       garrison: 800,
+    },
+    tyndaris: {
+      nation: 'neutral',
+      type: 'coastal_city',
+      terrain: 'coastal_city',
+      population: 12000,
+      fertility: 0.50,
+      buildings: ['порт', 'акрополь'],
+      production: { fish: 1500, trade_goods: 1200 },
+      garrison: 400,
+    },
+    calactea: {
+      nation: 'neutral',
+      type: 'rural',
+      terrain: 'coastal_city',
+      population: 18000,
+      fertility: 0.55,
+      buildings: ['рынок'],
+      production: { fish: 1200, wheat: 3500, trade_goods: 800 },
+      garrison: 300,
+    },
+    sicani: {
+      nation: 'neutral',
+      type: 'rural',
+      terrain: 'hills',
+      population: 42000,
+      fertility: 0.60,
+      buildings: ['деревни', 'пастбища'],
+      production: { wheat: 9000, timber: 4500, olives: 3000 },
+      garrison: 500,
+    },
+    acragas: {
+      nation: 'neutral',
+      type: 'coastal_city',
+      terrain: 'coastal_city',
+      population: 32000,
+      fertility: 0.50,
+      buildings: ['храм_зевса', 'порт', 'агора'],
+      production: { fish: 2500, olives: 4800, trade_goods: 2200 },
+      garrison: 2000,
     },
     rome: {
       nation: 'rome',
