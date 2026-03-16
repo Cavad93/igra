@@ -478,4 +478,111 @@ ${ctx.recent_laws.length ? ctx.recent_laws.map(l => `- ${l}`).join('\n') : '- з
 Произнеси горькую реплику, обращённую к Консулу — намекни на Blood_Feud, но не угрожай открыто.
 Используй имена погибших. Не называй исторических персонажей.`,
   }),
+
+  // ──────────────────────────────────────────────────────────
+  // 9. ДЕБАТЫ В СЕНАТЕ — динамические речи и реакция зала
+  // ──────────────────────────────────────────────────────────
+  senateDebate: (law, speakers, playerSpeech, senateCtx) => ({
+    system: `Ты — нарратор политических дебатов в Сенате античных Сиракуз, 301 BC.
+Тебе дан закон, предложенный Консулом, и список материализованных сенаторов с их фракциями.
+Твоя задача — сгенерировать живые, неповторимые речи каждого сенатора, реагирующие именно на ЭТОТ закон.
+
+ВАЖНО:
+- Каждый сенатор говорит своим голосом, исходя из интересов своей фракции и характера
+- Речи должны упоминать конкретные детали закона, а не быть шаблонными
+- Если закон выглядит абсурдным, опасным или радикальным — сенаторы должны реагировать остро: кричать, угрожать вето, требовать снятия вопроса
+- Оцени "radicalism" закона: 0=обычный, 1=смелый, 2=радикальный, 3=абсурдный/скандальный
+- При radicalism >= 2 добавь dramatic_event
+
+Отвечай ТОЛЬКО JSON, никакого текста вне JSON, никакого markdown.
+
+Схема ответа:
+{
+  "opening_cry": "Реакция зала на объявление закона — 1 короткая фраза",
+  "speaker_lines": [
+    {
+      "name": "точное имя из speakers",
+      "speech": "Речь 2-3 предложения в духе античности, про конкретный закон",
+      "vote": "for|against|abstain",
+      "intensity": "mild|strong|fierce"
+    }
+  ],
+  "radicalism": 0,
+  "dramatic_event": null
+}
+
+Формат dramatic_event (только при radicalism >= 2):
+{
+  "type": "walkout|shouting|demand_withdrawal|veto_threat|amendment_call",
+  "text": "Описание скандала — 1-2 предложения"
+}`,
+
+    user: `ЗАКОН: «${law.name}»
+ТЕКСТ ЗАКОНА: ${law.text || '(не указан)'}
+ТИП: ${law.type}
+РЕЧЬ КОНСУЛА ПЕРЕД СЕНАТОМ: ${playerSpeech || '(Консул не произнёс речи)'}
+
+МАТЕРИАЛИЗОВАННЫЕ СЕНАТОРЫ:
+${speakers.map(s => `- ${s.name} (фракция: ${s.faction_id}, лояльность: ${Math.round(s.loyalty_score)}, черты: ${(s.traits ?? []).join(', ')})`).join('\n')}
+
+КОНТЕКСТ СЕНАТА:
+${senateCtx ? JSON.stringify(senateCtx, null, 2) : '(нет дополнительного контекста)'}
+
+Сгенерируй речи всех перечисленных сенаторов и реакцию зала.`,
+  }),
+
+  // ──────────────────────────────────────────────────────────
+  // 10. АНАЛИЗ ЗАКОНА И ИЗВЛЕЧЕНИЕ ИГРОВЫХ ИЗМЕНЕНИЙ
+  // ──────────────────────────────────────────────────────────
+  analyzeLawEffects: (law, nation, arch) => ({
+    system: `Ты — парсер законов исторической стратегии «Сиракузы 301 BC».
+Читаешь текст принятого закона и возвращаешь JSON с конкретными изменениями игровых переменных.
+
+ДОПУСТИМЫЕ ПУТИ (только они):
+- "senate_config.state_architecture.senate_capacity"  → int 50-600 (число мест в Сенате)
+- "senate_config.state_architecture.consul_term"       → int 1-10 (срок Консула в годах)
+- "senate_config.state_architecture.consul_powers"     → "Limited"|"Standard"|"Dictatorial"
+- "senate_config.state_architecture.voting_system"     → "Plutocracy"|"Meritocracy"|"Democracy"
+- "senate_config.state_architecture.veto_rights"       → true|false (право вето трибуна)
+- "senate_config.state_architecture.election_cycle"    → int 1-10 (лет между выборами)
+- "senate_config.factions.aristocrats.seats"           → int (кресла аристократов)
+- "senate_config.factions.demos.seats"                 → int (кресла народной партии)
+- "senate_config.factions.military.seats"              → int (кресла военной фракции)
+- "senate_config.factions.merchants.seats"             → int (кресла торговцев)
+- "economy.tax_rate"                                   → float 0.05-0.35
+- "economy.treasury"                                   → int (op: "add", разовое изменение)
+- "military.infantry"                                  → int (op: "add", разовое изменение)
+- "population.happiness"                               → int (op: "add", -30..30)
+- "government.legitimacy"                              → int (op: "add", -20..20)
+
+ПРАВИЛА:
+- Применяй изменение только если в тексте закона прямо указано число или факт
+- Не выдумывай изменения которых нет в тексте
+- op="set" — задаёт конкретное значение, op="add" — прибавляет к текущему
+- Если закон ничего не меняет из списка → changes: []
+
+Отвечай ТОЛЬКО JSON, без markdown.
+
+Схема:
+{
+  "changes": [
+    { "path": "senate_config.state_architecture.senate_capacity", "op": "set", "value": 110 }
+  ],
+  "narrative": "Короткое (1 предложение) описание что изменилось в механике игры"
+}`,
+
+    user: `ПРИНЯТЫЙ ЗАКОН: «${law.name}»
+ТЕКСТ: ${law.text || '(нет текста)'}
+ТИП: ${law.type}
+
+ТЕКУЩИЕ ЗНАЧЕНИЯ (для op="add"):
+- Сенат: ${arch?.senate_capacity ?? '?'} мест, срок Консула: ${arch?.consul_term ?? '?'} лет
+- Система голосования: ${arch?.voting_system ?? '?'}
+- Полномочия Консула: ${arch?.consul_powers ?? '?'}
+- Право вето: ${arch?.veto_rights ?? false}
+- Налоговая ставка: ${nation?.economy?.tax_rate ?? '?'}
+- Казна: ${Math.round(nation?.economy?.treasury ?? 0)} монет
+
+Извлеки конкретные игровые изменения из этого закона.`,
+  }),
 };

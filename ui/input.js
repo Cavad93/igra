@@ -705,59 +705,109 @@ async function _runDebateAnimation(nationId, law, playerSpeech, result, speakers
   const stage = document.getElementById('debate-stage');
   if (!stage) return;
 
-  // — Фаза 0: Объявление —
+  // — Фаза 0: Объявление + запрос к AI (параллельно) —
   _debateAddPhase(stage, '⚖️ Консул берёт слово...');
-  await _wait(700);
+  await _wait(600);
+
+  // Запускаем AI-запрос в фоне пока показываем речь игрока
+  const mgr = getSenateManager(nationId);
+  const senateCtx = mgr ? {
+    global_mood:   mgr.getGlobalSentiment?.() ?? null,
+    faction_stats: mgr.getFactionStats?.() ?? null,
+  } : null;
+  const aiDebatePromise = (typeof generateSenateDebateViaLLM === 'function')
+    ? generateSenateDebateViaLLM(law, speakers, playerSpeech, senateCtx)
+    : Promise.resolve(null);
 
   // — Фаза 1: Речь игрока —
   if (playerSpeech && playerSpeech.trim()) {
     _debateAddSpeech(stage, {
-      portrait:     '👑',
-      name:         'Консул (вы)',
-      factionLabel: '',
-      text:         playerSpeech,
-      side:         'player',
+      portrait: '👑', name: 'Консул (вы)', factionLabel: '', text: playerSpeech, side: 'player',
     });
-    await _wait(1000);
-
-    // Реакция на ключевые слова в речи
+    await _wait(900);
     for (const r of resonance) {
-      await _wait(350);
+      await _wait(320);
       _debateAddNote(stage, `💬 Фракция «${r.name}» услышала ваши слова (+${r.bonus}% поддержки)`);
     }
-    if (resonance.length) await _wait(700);
+    if (resonance.length) await _wait(600);
   } else {
     _debateAddSpeech(stage, {
-      portrait:     '👑',
-      name:         'Консул',
-      factionLabel: '',
-      text:         `Выношу на голосование: «${law.name}». Прошу сенаторов высказаться.`,
-      side:         'player',
+      portrait: '👑', name: 'Консул', factionLabel: '',
+      text: `Выношу на голосование: «${law.name}». Прошу сенаторов высказаться.`,
+      side: 'player',
     });
-    await _wait(700);
+    await _wait(600);
+  }
+
+  // — Ожидаем AI (показываем спиннер если долго) —
+  let aiData = null;
+  if (speakers.length > 0) {
+    _debateAddPhase(stage, '🤔 Сенаторы изучают закон...');
+    aiData = await aiDebatePromise;
   }
 
   // — Фаза 2: Речи сенаторов —
   if (speakers.length > 0) {
-    _debateAddPhase(stage, '🗣️ Сенаторы высказываются...');
-    await _wait(500);
+    // Если AI вернул opening_cry — показываем реакцию зала
+    if (aiData?.opening_cry) {
+      _debateAddNote(stage, `📣 ${aiData.opening_cry}`);
+      await _wait(600);
+    }
 
+    // Если закон радикальный — предупреждение
+    const radicalism = aiData?.radicalism ?? 0;
+    if (radicalism >= 2) {
+      const radLabel = radicalism === 3
+        ? '🚨 Закон вызвал скандал в зале!'
+        : '⚠️ Закон встречает серьёзное сопротивление';
+      _debateAddPhase(stage, radLabel);
+      await _wait(700);
+    } else {
+      _debateAddPhase(stage, '🗣️ Сенаторы высказываются...');
+    }
+    await _wait(400);
+
+    // Речи: приоритет AI, fallback — шаблоны
+    const aiLines = aiData?.speaker_lines ?? [];
     for (const senator of speakers) {
-      const vote    = senator.loyalty_score > 52 ? 'for' : 'against';
-      const speech  = _pickSpeech(senator.faction_id, vote);
+      const aiLine = aiLines.find(l => l.name === senator.name);
+      const vote    = aiLine?.vote ?? (senator.loyalty_score > 52 ? 'for' : 'against');
+      const speech  = aiLine?.speech ?? _pickSpeech(senator.faction_id, vote);
+      const intense = aiLine?.intensity ?? 'mild';
+
       _debateAddSpeech(stage, {
         portrait:     senator.portrait ?? '👤',
         name:         senator.name,
         factionLabel: _factionLabel(senator.faction_id),
         text:         speech,
         side:         vote,
+        intense,
       });
-      await _wait(650 + Math.random() * 300);
+      // Яростные речи — чуть дольше пауза
+      await _wait(600 + (intense === 'fierce' ? 400 : intense === 'strong' ? 200 : 0) + Math.random() * 250);
     }
-    await _wait(500);
+
+    // Dramatic event — скандал, выход из зала, угроза вето
+    if (aiData?.dramatic_event) {
+      await _wait(400);
+      const evtClass = aiData.dramatic_event.type === 'walkout' ? 'dbe-walkout'
+                     : aiData.dramatic_event.type === 'veto_threat' ? 'dbe-veto'
+                     : 'dbe-scandal';
+      const evtEl = document.createElement('div');
+      evtEl.className = `debate-dramatic-event ${evtClass}`;
+      evtEl.innerHTML = `
+        <span class="dde-icon">${aiData.dramatic_event.type === 'walkout' ? '🚶' : aiData.dramatic_event.type === 'veto_threat' ? '✋' : '💥'}</span>
+        <span>${aiData.dramatic_event.text}</span>
+      `;
+      stage.appendChild(evtEl);
+      stage.scrollTop = stage.scrollHeight;
+      await _wait(900);
+    }
+
+    await _wait(400);
   } else {
     _debateAddPhase(stage, '🌑 Анонимные сенаторы молча занимают места...');
-    await _wait(800);
+    await _wait(700);
   }
 
   // — Фаза 3: Голосование —
@@ -774,28 +824,20 @@ async function _runDebateAnimation(nationId, law, playerSpeech, result, speakers
   stage.appendChild(vcDiv);
   stage.scrollTop = stage.scrollHeight;
 
-  await _animateVoteCount(
-    Math.round(result.for),
-    Math.round(result.against),
-    Math.round(result.abstain),
-    2200
-  );
+  await _animateVoteCount(Math.round(result.for), Math.round(result.against), Math.round(result.abstain), 2200);
   await _wait(600);
 
   // Коалиции
   if (result.coalitions?.length) {
     for (const [f1, f2, dir] of result.coalitions) {
-      _debateAddNote(stage,
-        `🤝 Коалиция: «${_factionLabel(f1)}» и «${_factionLabel(f2)}» голосуют вместе (${dir > 0 ? 'за' : 'против'})`
-      );
-      await _wait(300);
+      _debateAddNote(stage, `🤝 Коалиция: «${_factionLabel(f1)}» и «${_factionLabel(f2)}» голосуют вместе (${dir > 0 ? 'за' : 'против'})`);
+      await _wait(280);
     }
     await _wait(400);
   }
 
   // — Фаза 4: Вердикт —
   const passed = result.passed && !result.vetoed;
-
   const verdictEl = document.createElement('div');
   verdictEl.className = `debate-verdict ${passed ? 'debate-verdict-pass' : 'debate-verdict-fail'}`;
   verdictEl.innerHTML = passed
@@ -836,11 +878,61 @@ function finalizeDebateVote(nationId, lawJson, votesFor, votesAgainst, votesAbst
     GAME_STATE.nations[nationId].active_laws ??= [];
     GAME_STATE.nations[nationId].active_laws.push(law);
     addEventLog(`Закон "${law.name}" принят Сенатом! За: ${votesFor}, Против: ${votesAgainst}.`, 'law');
+
+    // AI агент анализирует закон и применяет изменения к игровой механике
+    _applyLawChangesAsync(law, nationId);
   } else {
     addEventLog(`Закон "${law.name}" отклонён Сенатом. За: ${votesFor}, Против: ${votesAgainst}.`, 'law');
   }
 
   renderAll();
+}
+
+// Fire-and-forget: запрашивает AI анализ и применяет изменения
+async function _applyLawChangesAsync(law, nationId) {
+  if (typeof analyzeLawEffectsViaLLM !== 'function') return;
+  try {
+    const analysis = await analyzeLawEffectsViaLLM(law, nationId);
+    if (!analysis || !analysis.changes?.length) return;
+
+    const applied = (typeof applyLawGameChanges === 'function')
+      ? applyLawGameChanges(analysis.changes, nationId)
+      : [];
+
+    if (applied.length > 0) {
+      // Показываем что изменилось
+      const lines = applied.map(ch => _formatLawChange(ch));
+      addEventLog(
+        `⚙️ ${analysis.narrative || `Закон «${law.name}» изменил механику:`} ${lines.join(' | ')}`,
+        'law'
+      );
+      renderAll();
+    }
+  } catch (err) {
+    console.warn('_applyLawChangesAsync:', err.message);
+  }
+}
+
+// Форматирует одно изменение для лога
+function _formatLawChange(ch) {
+  const label = {
+    'senate_config.state_architecture.senate_capacity': 'мест в Сенате',
+    'senate_config.state_architecture.consul_term':     'срок Консула (лет)',
+    'senate_config.state_architecture.consul_powers':   'полномочия Консула',
+    'senate_config.state_architecture.voting_system':   'система голосования',
+    'senate_config.state_architecture.veto_rights':     'право вето',
+    'senate_config.state_architecture.election_cycle':  'цикл выборов (лет)',
+    'economy.tax_rate':   'налог',
+    'economy.treasury':   'казна',
+    'military.infantry':  'пехота',
+    'population.happiness': 'счастье',
+    'government.legitimacy': 'легитимность',
+  }[ch.path] ?? ch.path.split('.').pop();
+
+  if (ch.delta !== undefined) {
+    return `${label}: ${ch.delta > 0 ? '+' : ''}${ch.delta} (→${ch.next})`;
+  }
+  return `${label}: ${ch.prev} → ${ch.next}`;
 }
 
 // ──────────────────────────────────────────────────────────────

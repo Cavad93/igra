@@ -539,3 +539,162 @@ async function simulateInstitutionVote(proposalText, institutionId, calculatedEf
     return { ...voteResult, key_speeches: [], amendments_proposed: [], unexpected_events: [] };
   }
 }
+
+// ──────────────────────────────────────────────────────────────
+// ДЕБАТЫ СЕНАТА — AI генерирует живые, нешаблонные речи
+// ──────────────────────────────────────────────────────────────
+
+// Генерирует динамические речи сенаторов для дебатного зала.
+// speakers — массив материализованных сенаторов из SenateManager.getMaterialized()
+// Возвращает: { opening_cry, speaker_lines[], radicalism, dramatic_event } или null при ошибке
+async function generateSenateDebateViaLLM(law, speakers, playerSpeech, senateCtx) {
+  if (!CONFIG.API_KEY || !speakers.length) return null;
+  try {
+    const { system, user } = PROMPTS.senateDebate(law, speakers, playerSpeech, senateCtx ?? {});
+    const raw = await callClaude(system, user, 900, CONFIG.MODEL_HAIKU);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]);
+    // Базовая валидация
+    if (!Array.isArray(parsed.speaker_lines)) return null;
+    return parsed;
+  } catch (err) {
+    console.warn('generateSenateDebateViaLLM error:', err.message);
+    return null;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// АНАЛИЗ ПРИНЯТОГО ЗАКОНА — AI извлекает игровые изменения
+// ──────────────────────────────────────────────────────────────
+
+// После принятия закона — анализирует текст и возвращает список
+// конкретных изменений игровой механики.
+// Возвращает: { changes[], narrative } или null при ошибке
+async function analyzeLawEffectsViaLLM(law, nationId) {
+  if (!CONFIG.API_KEY) return null;
+  try {
+    const nation = GAME_STATE.nations[nationId];
+    const arch = nation?.senate_config?.state_architecture ?? null;
+    const { system, user } = PROMPTS.analyzeLawEffects(law, nation, arch);
+    const raw = await callClaude(system, user, 600, CONFIG.MODEL_HAIKU);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]);
+    if (!Array.isArray(parsed.changes)) return null;
+    return parsed;
+  } catch (err) {
+    console.warn('analyzeLawEffectsViaLLM error:', err.message);
+    return null;
+  }
+}
+
+// Применяет массив изменений из analyzeLawEffectsViaLLM к GAME_STATE.
+// Безопасно: только допустимые пути, с проверкой типов и диапазонов.
+function applyLawGameChanges(changes, nationId) {
+  const nation = GAME_STATE.nations[nationId];
+  if (!nation || !Array.isArray(changes)) return [];
+
+  const arch = nation.senate_config?.state_architecture;
+  const applied = [];
+
+  for (const ch of changes) {
+    try {
+      const { path, op, value } = ch;
+      if (typeof path !== 'string') continue;
+
+      // ── senate_config.state_architecture.* ────────────────
+      if (path.startsWith('senate_config.state_architecture.') && arch) {
+        const field = path.split('.')[2];
+        const allowed = ['senate_capacity','consul_term','consul_powers','voting_system','veto_rights','election_cycle'];
+        if (!allowed.includes(field)) continue;
+
+        const prev = arch[field];
+        let next = value;
+
+        // Диапазоны и типы
+        if (field === 'senate_capacity') next = Math.max(50, Math.min(600, parseInt(value) || prev));
+        else if (field === 'consul_term')   next = Math.max(1, Math.min(10, parseInt(value) || prev));
+        else if (field === 'election_cycle') next = Math.max(1, Math.min(10, parseInt(value) || prev));
+        else if (field === 'consul_powers')  next = ['Limited','Standard','Dictatorial'].includes(value) ? value : prev;
+        else if (field === 'voting_system')  next = ['Plutocracy','Meritocracy','Democracy'].includes(value) ? value : prev;
+        else if (field === 'veto_rights')    next = Boolean(value);
+
+        if (next === prev) continue;
+        arch[field] = next;
+        // Синхронизируем senate_config.total_seats если менялась вместимость
+        if (field === 'senate_capacity') nation.senate_config.total_seats = next;
+        applied.push({ path, prev, next });
+        continue;
+      }
+
+      // ── senate_config.factions.*.seats ────────────────────
+      const factionMatch = path.match(/^senate_config\.factions\.(\w+)\.seats$/);
+      if (factionMatch && nation.senate_config?.factions) {
+        const fid = factionMatch[1];
+        const faction = nation.senate_config.factions.find(f => f.id === fid);
+        if (!faction) continue;
+        const prev = faction.seats;
+        const next = Math.max(1, Math.min(300, parseInt(value) || prev));
+        if (next === prev) continue;
+        faction.seats = next;
+        applied.push({ path, prev, next });
+        continue;
+      }
+
+      // ── economy.tax_rate ──────────────────────────────────
+      if (path === 'economy.tax_rate' && nation.economy) {
+        const prev = nation.economy.tax_rate;
+        const next = Math.max(0.05, Math.min(0.35, parseFloat(op === 'add' ? prev + value : value) || prev));
+        if (Math.abs(next - prev) < 0.001) continue;
+        nation.economy.tax_rate = Math.round(next * 1000) / 1000;
+        applied.push({ path, prev, next: nation.economy.tax_rate });
+        continue;
+      }
+
+      // ── economy.treasury (op: add) ────────────────────────
+      if (path === 'economy.treasury' && nation.economy && op === 'add') {
+        const delta = Math.max(-50000, Math.min(50000, parseInt(value) || 0));
+        if (!delta) continue;
+        const prev = Math.round(nation.economy.treasury);
+        nation.economy.treasury += delta;
+        applied.push({ path, prev, next: Math.round(nation.economy.treasury), delta });
+        continue;
+      }
+
+      // ── military.infantry (op: add) ───────────────────────
+      if (path === 'military.infantry' && nation.military && op === 'add') {
+        const delta = Math.max(-5000, Math.min(5000, parseInt(value) || 0));
+        if (!delta) continue;
+        const prev = nation.military.infantry;
+        nation.military.infantry = Math.max(0, prev + delta);
+        applied.push({ path, prev, next: nation.military.infantry, delta });
+        continue;
+      }
+
+      // ── population.happiness (op: add) ───────────────────
+      if (path === 'population.happiness' && nation.population && op === 'add') {
+        const delta = Math.max(-30, Math.min(30, parseInt(value) || 0));
+        if (!delta) continue;
+        const prev = nation.population.happiness;
+        nation.population.happiness = Math.max(0, Math.min(100, prev + delta));
+        applied.push({ path, prev, next: nation.population.happiness, delta });
+        continue;
+      }
+
+      // ── government.legitimacy (op: add) ──────────────────
+      if (path === 'government.legitimacy' && nation.government && op === 'add') {
+        const delta = Math.max(-20, Math.min(20, parseInt(value) || 0));
+        if (!delta) continue;
+        const prev = nation.government.legitimacy;
+        nation.government.legitimacy = Math.max(0, Math.min(100, prev + delta));
+        applied.push({ path, prev, next: nation.government.legitimacy, delta });
+        continue;
+      }
+    } catch (e) {
+      console.warn('applyLawGameChanges: skip', ch, e.message);
+    }
+  }
+
+  return applied;
+}
