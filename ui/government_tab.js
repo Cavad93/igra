@@ -185,7 +185,14 @@ function renderPersonRuler(ruler, nation) {
 }
 
 function renderCouncilRuler(ruler, nation) {
-  const memberCount = ruler.character_ids?.length ?? 0;
+  // Ищем nationId по объекту нации, чтобы получить реальное число сенаторов
+  const nationId    = Object.keys(GAME_STATE.nations).find(k => GAME_STATE.nations[k] === nation);
+  const senateMgr   = nationId ? getSenateManager(nationId) : null;
+  const memberCount = senateMgr
+    ? senateMgr.senators.length                    // реальные сенаторы из SenateManager
+    : (ruler.character_ids?.length || null);        // fallback: именные персонажи
+
+  const memberStr = memberCount != null ? memberCount : 'неизвестно';
 
   return `
     <div class="gov-section">
@@ -193,7 +200,7 @@ function renderCouncilRuler(ruler, nation) {
       <div class="gov-council-card">
         <div class="gov-council-name">${ruler.name}</div>
         <div class="gov-council-meta">
-          Членов: ${memberCount > 0 ? memberCount : 'неизвестно'} ·
+          Членов: ${memberStr} ·
           Личная власть главы совета: ${ruler.personal_power ?? 20}/100
         </div>
         <div class="gov-council-note">⚖️ Решения принимаются коллегиально</div>
