@@ -1447,31 +1447,43 @@ function renderSenateLazyBlock(nationId) {
   const factionLabels = mgr.factions.map(f => {
     const s = stats[f.id];
     const loyaltyColor = s.avg_loyalty > 60 ? '#4CAF50' : s.avg_loyalty > 35 ? '#FF9800' : '#f44336';
+    const leader = mgr.getFactionLeader(f.id);
+    const leaderHtml = leader
+      ? `<span class="senate-faction-leader" title="Лидер фракции">${leader.portrait ?? '👤'} ${leader.name}</span>`
+      : '';
     return `
       <div class="senate-faction-label">
         <span class="senate-faction-dot" style="background:${f.color}"></span>
         <span class="senate-faction-name">${f.name}</span>
         <span class="senate-faction-seats">${s.seats}</span>
         <span class="senate-faction-loyalty" style="color:${loyaltyColor}">~${s.avg_loyalty}%</span>
+        ${leaderHtml}
       </div>`;
   }).join('');
 
   // Карточки материализованных сенаторов
   const matCards = materialized.map(s => {
-    const faction = mgr.factions.find(f => f.id === s.faction_id);
-    const loyColor = s.loyalty_score > 60 ? '#4CAF50' : s.loyalty_score > 35 ? '#FF9800' : '#f44336';
-    const tagHtml = (s.traits ?? []).map(t =>
+    const faction    = mgr.factions.find(f => f.id === s.faction_id);
+    const isLeader   = faction?.leader_senator_id === s.id;
+    const loyColor   = s.loyalty_score > 60 ? '#4CAF50' : s.loyalty_score > 35 ? '#FF9800' : '#f44336';
+    const tagHtml    = (s.traits ?? []).map(t =>
       `<span class="senate-tag">${t}</span>`
     ).join('');
+    const leaderBadge = isLeader
+      ? `<span class="senate-leader-badge" title="Лидер фракции">👑</span>`
+      : '';
+    const cardClass = isLeader
+      ? 'senate-senator-card senate-senator-materialized senate-senator-leader'
+      : 'senate-senator-card senate-senator-materialized';
     return `
-      <div class="senate-senator-card senate-senator-materialized"
+      <div class="${cardClass}"
            onclick="openSenatorCard('${s.id}', '${nationId}')"
            title="${s.biography ?? ''}">
-        <span class="senate-senator-portrait">${s.portrait ?? '👤'}</span>
+        <span class="senate-senator-portrait">${s.portrait ?? '👤'}${leaderBadge}</span>
         <div class="senate-senator-info">
           <div class="senate-senator-name">${s.name}</div>
           <div class="senate-senator-tags">${tagHtml}</div>
-          <div class="senate-senator-faction" style="color:${faction?.color ?? '#aaa'}">${faction?.name ?? ''}</div>
+          <div class="senate-senator-faction" style="color:${faction?.color ?? '#aaa'}">${faction?.name ?? ''}${isLeader ? ' · лидер' : ''}</div>
         </div>
         <div class="senate-senator-loyalty" style="color:${loyColor}">${s.loyalty_score}%</div>
       </div>`;

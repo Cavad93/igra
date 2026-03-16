@@ -61,7 +61,8 @@ const HIDDEN_INTEREST_POOL = [
 class SenateManager {
   constructor(nationId, factions) {
     this.nationId  = nationId;
-    this.factions  = factions;  // [{id, name, seats, color}]
+    // Клонируем фракции, добавляем leader_senator_id если отсутствует
+    this.factions  = factions.map(f => ({ ...f, leader_senator_id: f.leader_senator_id ?? null }));
     this.senators  = [];
     this.clans     = {};         // { clan_id: ClanRecord }
     this.global_senate_state = 'Сенат спокоен. Политическая жизнь идёт своим чередом.';
@@ -121,6 +122,224 @@ class SenateManager {
       revealed_interests: [],    // открыты разведкой
       materialized:     false,
     };
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // СВЯЗЬ С ИМЕННЫМИ ПЕРСОНАЖАМИ (nation.characters)
+  // ══════════════════════════════════════════════════════════════════════
+
+  // Вызывается при initSenateForNation: персонажи с senate_faction_id
+  // занимают место призрака в своей фракции и считаются материализованными.
+  injectNamedCharactersAsSenators(characters) {
+    const candidates = (characters ?? []).filter(c => c.alive && c.senate_faction_id);
+    for (const char of candidates) {
+      const factionId = char.senate_faction_id;
+      if (!this.factions.find(f => f.id === factionId)) continue;
+
+      // Ищем свободный призрак в нужной фракции
+      const ghostIdx = this.senators.findIndex(
+        s => !s.materialized && s.faction_id === factionId && !s.character_id
+      );
+
+      const record = this._characterToSenator(char, factionId);
+
+      if (ghostIdx !== -1) {
+        this.senators[ghostIdx] = record;
+      } else {
+        // Призраков во фракции нет — добавляем сверх лимита
+        this.senators.push(record);
+      }
+    }
+
+    // Выбираем начальных лидеров фракций
+    for (const faction of this.factions) {
+      this._electFactionLeader(faction.id, 'initial');
+    }
+  }
+
+  // Строит запись сенатора из объекта character
+  _characterToSenator(char, factionId) {
+    const clanIds  = Object.keys(this.clans);
+    const clan_id  = clanIds.length
+      ? clanIds[Math.floor(Math.random() * clanIds.length)]
+      : null;
+    const loyalty     = char.traits?.loyalty    ?? 50;
+    const ambitionRaw = char.traits?.ambition   ?? 50;
+    const ambition    = Math.max(1, Math.min(5, Math.round(ambitionRaw / 20)));
+
+    return {
+      id:                   `CHAR_SEN_${char.id}`,
+      character_id:         char.id,
+      faction_id:           factionId,
+      clan_id,
+      loyalty_score:        loyalty,
+      ambition_level:       ambition,
+      current_age:          char.age  ?? 40,
+      health_points:        char.health ?? 80,
+      wealth:               char.resources?.gold ?? 3000,
+      hidden_interests:     this._mapCharInterests(char),
+      revealed_interests:   [],
+      materialized:         true,
+      materialized_turn:    0,
+      materialized_reason:  'named_character',
+      name:                 char.name,
+      portrait:             char.portrait ?? '👤',
+      biography:            char.description ?? '',
+      traits:               this._mapCharTraits(char),
+      influence:            Math.round(Math.min(100, (char.resources?.followers ?? 0) / 5 + 30)),
+    };
+  }
+
+  _mapCharTraits(char) {
+    const t = char.traits ?? {};
+    const tags = [];
+    if (t.ambition > 70)  tags.push('Честолюбец');
+    if (t.caution  > 70)  tags.push('Осторожный');
+    if (t.loyalty  > 70)  tags.push('Верный');
+    if (t.loyalty  < 30)  tags.push('Интриган');
+    if (t.piety    > 70)  tags.push('Благочестивый');
+    if (t.cruelty  > 60)  tags.push('Жёсткий');
+    if (t.greed    > 70)  tags.push('Жадный');
+    const roleTag = { general: 'Полководец', merchant: 'Торговец', priest: 'Жрец',
+                      senator: 'Сенатор', advisor: 'Советник' }[char.role];
+    if (roleTag) tags.push(roleTag);
+    return tags;
+  }
+
+  _mapCharInterests(char) {
+    const interests = [];
+    const wants = char.wants ?? [];
+    if (wants.some(w => w.includes('торг') || w.includes('монопол'))) interests.push('Grain_Monopolist');
+    if (wants.some(w => w.includes('земл'))) interests.push('Land_Speculator');
+    if (char.role === 'merchant') interests.push('Grain_Monopolist');
+    if (char.role === 'priest')   interests.push('Temple_Patron');
+    if (char.role === 'general' || (char.resources?.army_command ?? 0) > 0) interests.push('Arms_Dealer');
+    if (!interests.length) {
+      interests.push(HIDDEN_INTEREST_POOL[Math.floor(Math.random() * HIDDEN_INTEREST_POOL.length)]);
+    }
+    return interests;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ЛИДЕРСТВО ФРАКЦИЙ
+  // ══════════════════════════════════════════════════════════════════════
+
+  // Возвращает объект senator — текущего лидера фракции (или null).
+  getFactionLeader(factionId) {
+    const faction = this.factions.find(f => f.id === factionId);
+    if (!faction?.leader_senator_id) return null;
+    return this.getSenatorById(faction.leader_senator_id);
+  }
+
+  // Выбирает нового лидера фракции из материализованных сенаторов.
+  // Формула: influence×0.4 + loyalty×0.3 + ambition×20×0.3
+  // reason: 'initial' | 'vacancy' | 'death' | 'loyalty_collapse' | 'challenge'
+  _electFactionLeader(factionId, reason = 'election') {
+    const faction = this.factions.find(f => f.id === factionId);
+    if (!faction) return null;
+
+    const candidates = this.senators.filter(
+      s => s.faction_id === factionId && s.materialized
+    );
+    if (!candidates.length) {
+      faction.leader_senator_id = null;
+      return null;
+    }
+
+    const scored = candidates
+      .map(s => ({
+        senator: s,
+        score: (s.influence ?? 40) * 0.4 + s.loyalty_score * 0.3 + s.ambition_level * 20 * 0.3,
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    const prevId   = faction.leader_senator_id;
+    const newLeader = scored[0].senator;
+    faction.leader_senator_id = newLeader.id;
+
+    const isPlayer = this.nationId === GAME_STATE.player_nation;
+
+    if (reason !== 'initial' && prevId !== newLeader.id) {
+      const oldLeader = prevId ? this.getSenatorById(prevId) : null;
+      const oldName   = oldLeader?.name ?? 'прежний лидер';
+      const causeText = {
+        vacancy:         'вакансия после гибели',
+        death:           'гибель лидера',
+        loyalty_collapse:'потеря доверия фракции',
+        challenge:       'победа в политической борьбе',
+        election:        'перевыборы',
+      }[reason] ?? reason;
+
+      if (isPlayer) {
+        addEventLog(
+          `🏛️ Фракция «${faction.name}»: ${newLeader.name} сменяет ${oldName} (${causeText}).`,
+          'law'
+        );
+      }
+
+      // Краткосрочный сплочённый эффект: +3 лояльности всем членам фракции
+      for (const s of candidates) {
+        if (s.id !== newLeader.id) {
+          s.loyalty_score = Math.min(100, s.loyalty_score + 3);
+        }
+      }
+    }
+
+    return newLeader;
+  }
+
+  // Проверяет смену лидерства для всех фракций — вызывается из processTick.
+  _checkFactionLeadershipChanges(isPlayer) {
+    for (const faction of this.factions) {
+      // 1. Нет лидера — избрать
+      if (!faction.leader_senator_id) {
+        this._electFactionLeader(faction.id, 'vacancy');
+        continue;
+      }
+
+      const leader = this.getSenatorById(faction.leader_senator_id);
+
+      // 2. Лидер исчез (умер / исключён)
+      if (!leader) {
+        this._electFactionLeader(faction.id, 'death');
+        continue;
+      }
+
+      // 3. Крах лояльности (< 25): 60% шанс свержения
+      if (leader.loyalty_score < 25 && Math.random() < 0.60) {
+        if (isPlayer) {
+          addEventLog(
+            `⚠️ Фракция «${faction.name}» теряет веру в ${leader.name} — его лояльность рухнула.`,
+            'warning'
+          );
+        }
+        this._electFactionLeader(faction.id, 'loyalty_collapse');
+        continue;
+      }
+
+      // 4. Амбициозный вызов раз в 24 хода (~2 года)
+      if (GAME_STATE.turn % 24 === 0) {
+        const challenger = this.senators
+          .filter(s => s.faction_id === faction.id && s.materialized &&
+                       s.id !== leader.id && s.ambition_level >= 4)
+          .sort((a, b) => b.ambition_level - a.ambition_level)[0];
+
+        if (challenger) {
+          const leaderScore     = (leader.influence     ?? 40) * 0.4 + leader.loyalty_score     * 0.3 + leader.ambition_level     * 20 * 0.3;
+          const challengerScore = (challenger.influence ?? 40) * 0.4 + challenger.loyalty_score * 0.3 + challenger.ambition_level * 20 * 0.3;
+
+          if (challengerScore > leaderScore * 1.20) {
+            if (isPlayer) {
+              addEventLog(
+                `🔥 ${challenger.name} бросает вызов лидеру «${faction.name}» ${leader.name}!`,
+                'warning'
+              );
+            }
+            this._electFactionLeader(faction.id, 'challenge');
+          }
+        }
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -534,6 +753,9 @@ class SenateManager {
     if (turn % 12 === 0) {
       await this._runYearlyLifeCycle();
     }
+
+    // Проверяем смену лидеров фракций (каждый ход: вакансия/гибель; раз в 24 хода: вызов)
+    this._checkFactionLeadershipChanges(isPlayer);
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -591,6 +813,15 @@ class SenateManager {
     }
 
     this.senators[idx] = successor;
+
+    // Если ушедший был лидером фракции — сбрасываем, processTick переизберёт
+    for (const faction of this.factions) {
+      if (faction.leader_senator_id === oldSenator.id) {
+        faction.leader_senator_id = null;
+        break;
+      }
+    }
+
     return successor;
   }
 
@@ -810,6 +1041,8 @@ function initSenateForNation(nationId) {
 
   const mgr = new SenateManager(nationId, nation.senate_config.factions);
   mgr.init(nation.senate_config.clans ?? []);
+  // Вставляем именных персонажей нации как материализованных сенаторов
+  mgr.injectNamedCharactersAsSenators(nation.characters ?? []);
   SENATE_MANAGERS[nationId] = mgr;
   return mgr;
 }

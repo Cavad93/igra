@@ -43,6 +43,7 @@ const INITIAL_CHARACTERS_SYRACUSE = [
     portrait: '👴',
     description: 'Аристократ старого рода. Презирает Агафокла, но умело скрывает это.',
     disposition: 28, ambition_goal: 'восстановить_олигархию', court_role: 'советник',
+    senate_faction_id: 'aristocrats',
   },
 
   {
@@ -85,6 +86,7 @@ const INITIAL_CHARACTERS_SYRACUSE = [
     portrait: '⚔️',
     description: 'Блестящий молодой стратег. Победил карфагенян в двух битвах. Честолюбив.',
     disposition: 75, ambition_goal: 'стать_главным_стратегом', court_role: 'полководец',
+    senate_faction_id: 'military',
   },
 
   {
@@ -127,6 +129,7 @@ const INITIAL_CHARACTERS_SYRACUSE = [
     portrait: '💰',
     description: 'Богатейший торговец Сиракуз, связанный торговыми нитями от Египта до Рима.',
     disposition: 52, ambition_goal: 'торговая_монополия_с_египтом', court_role: 'казначей',
+    senate_faction_id: 'merchants',
   },
 
   {
@@ -169,6 +172,7 @@ const INITIAL_CHARACTERS_SYRACUSE = [
     portrait: '🏛️',
     description: 'Главный жрец храма Аполлона. Знает много тайн города. Пользуется любовью народа.',
     disposition: 60, ambition_goal: 'построить_храм_зевса', court_role: 'верховный_жрец',
+    senate_faction_id: 'demos',
   },
 
   {
