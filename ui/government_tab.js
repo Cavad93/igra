@@ -192,9 +192,9 @@ function renderCouncilRuler(ruler, nation) {
   // Ищем nationId по объекту нации, чтобы получить реальное число сенаторов
   const nationId    = Object.keys(GAME_STATE.nations).find(k => GAME_STATE.nations[k] === nation);
   const senateMgr   = nationId ? getSenateManager(nationId) : null;
-  const memberCount = senateMgr
-    ? senateMgr.senators.length                    // реальные сенаторы из SenateManager
-    : (ruler.character_ids?.length || null);        // fallback: именные персонажи
+  const sc          = nationId ? GAME_STATE.nations[nationId]?.senate_config : null;
+  const memberCount = sc?.total_seats
+    ?? (senateMgr ? senateMgr.senators.length : (ruler.character_ids?.length || null));
 
   const memberStr = memberCount != null ? memberCount : 'неизвестно';
 
