@@ -496,3 +496,15 @@ function getPowerResourceColor(type) {
   };
   return colors[type] ?? '#d4a853';
 }
+
+function getPowerResourceIcon(type) {
+  const icons = {
+    fear:             '😨',
+    legitimacy:       '⚖️',
+    prestige:         '👑',
+    divine_mandate:   '✨',
+    wealth:           '💰',
+    military_loyalty: '⚔️',
+  };
+  return icons[type] ?? '🔮';
+}
