@@ -364,6 +364,7 @@ function loadGame() {
       _migrateCharacterIds();
       _sanitizeInstitutions();
       _migrateSenateConfig();
+      _migrateCharacterSenateFields();
       addEventLog('Игра загружена из сохранения.', 'info');
       return true;
     }
@@ -420,6 +421,33 @@ function _migrateSenateConfig() {
       const initial = INITIAL_GAME_STATE.nations?.[nationId];
       if (initial?.senate_config) {
         nation.senate_config = JSON.parse(JSON.stringify(initial.senate_config));
+      }
+    }
+  }
+}
+
+// Переносит senate_faction_id и другие новые поля из INITIAL_CHARACTERS_*
+// в персонажей, загруженных из старого сохранения (где этих полей ещё нет).
+function _migrateCharacterSenateFields() {
+  const INITIAL_SETS = {
+    syracuse: typeof INITIAL_CHARACTERS_SYRACUSE !== 'undefined' ? INITIAL_CHARACTERS_SYRACUSE : [],
+    rome:     typeof INITIAL_SENATORS_ROME        !== 'undefined' ? INITIAL_SENATORS_ROME        : [],
+    carthage: typeof INITIAL_COUNCIL_CARTHAGE     !== 'undefined' ? INITIAL_COUNCIL_CARTHAGE     : [],
+    egypt:    typeof INITIAL_COURT_EGYPT          !== 'undefined' ? INITIAL_COURT_EGYPT          : [],
+    macedon:  typeof INITIAL_HETAIROI_MACEDON     !== 'undefined' ? INITIAL_HETAIROI_MACEDON     : [],
+    numidia:  typeof INITIAL_ELDERS_NUMIDIA       !== 'undefined' ? INITIAL_ELDERS_NUMIDIA       : [],
+  };
+
+  for (const [nationId, initials] of Object.entries(INITIAL_SETS)) {
+    const nation = GAME_STATE.nations[nationId];
+    if (!nation?.characters?.length || !initials.length) continue;
+
+    for (const saved of nation.characters) {
+      const template = initials.find(c => c.id === saved.id);
+      if (!template) continue;
+      // Копируем только поля, которых нет в сохранении
+      if (template.senate_faction_id && !saved.senate_faction_id) {
+        saved.senate_faction_id = template.senate_faction_id;
       }
     }
   }
