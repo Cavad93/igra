@@ -151,21 +151,21 @@ const INITIAL_GAME_STATE = {
       // Активируется при переходе к демократии/республике,
       // но данные инициализируются сразу — нулевая цена.
       senate_config: {
-        total_seats: 90,
+        total_seats: 100,
         factions: [
-          { id: 'aristocrats', name: 'Аристократы',    seats: 30, color: '#9C27B0',
+          { id: 'aristocrats', name: 'Аристократы',    seats: 33, color: '#9C27B0',
             wants: ['land_reform', 'noble_privilege', 'tradition'],
             fears: ['democracy', 'debt_cancellation', 'populism'],
             preferred_law_types: ['reform', 'taxes'] },
-          { id: 'demos',       name: 'Народная партия', seats: 25, color: '#4CAF50',
+          { id: 'demos',       name: 'Народная партия', seats: 28, color: '#4CAF50',
             wants: ['cheap_grain', 'public_works', 'debt_relief'],
             fears: ['war', 'oligarchy', 'taxation'],
             preferred_law_types: ['build', 'trade'] },
-          { id: 'military',    name: 'Военная фракция', seats: 22, color: '#f44336',
+          { id: 'military',    name: 'Военная фракция', seats: 24, color: '#f44336',
             wants: ['war_funding', 'veteran_land', 'military_glory'],
             fears: ['peace_treaty', 'budget_cuts', 'demobilization'],
             preferred_law_types: ['war', 'build'] },
-          { id: 'merchants',   name: 'Торговцы',        seats: 13, color: '#FF9800',
+          { id: 'merchants',   name: 'Торговцы',        seats: 15, color: '#FF9800',
             wants: ['free_trade', 'port_expansion', 'low_tariffs'],
             fears: ['war', 'grain_tax', 'piracy'],
             preferred_law_types: ['trade', 'diplomacy'] },
@@ -182,7 +182,7 @@ const INITIAL_GAME_STATE = {
         // ── Конституционные мета-правила (StateArchitecture) ──────────
         // Изменяются только через ConstitutionalEngine.process_constitutional_law()
         state_architecture: {
-          senate_capacity: 90,           // 90–600 мест
+          senate_capacity: 100,          // 90–600 мест
           election_cycle:  4,            // лет между выборами
           consul_term:     2,            // лет срока Консула
           consul_powers:   'Standard',   // 'Limited' | 'Standard' | 'Dictatorial'
