@@ -1530,6 +1530,14 @@ function renderSenateLazyBlock(nationId) {
       ${matCards ? `<div class="senate-senators-list">${matCards}</div>` : ''}
       ${ghostSummary ? `<div class="senate-senators-list senate-ghosts">${ghostSummary}</div>` : ''}
 
+      <div style="margin-top:8px;">
+        <button onclick="openSenateLawProposal('${nationId}')"
+                style="width:100%;padding:7px;background:rgba(100,180,255,0.1);border:1px solid rgba(100,180,255,0.3);
+                       border-radius:4px;color:#88ccff;cursor:pointer;font-size:12px;">
+          📋 Вынести закон на голосование Сената
+        </button>
+      </div>
+
     </div>`;
 }
 
@@ -1587,14 +1595,152 @@ function openSenatorCard(senatorId, nationId) {
     history:     [],
   };
 
-  const nation = GAME_STATE.nations[nationId];
+  const senFaction  = mgr.factions.find(f => f.id === s.faction_id);
+  const isLeader    = senFaction?.leader_senator_id === s.id;
+  const nation      = GAME_STATE.nations[nationId];
+  const bribeAmount = Math.round((s.wealth ?? 3000) * 0.6);
+  const canBribe    = (nation.economy?.treasury ?? 0) >= bribeAmount;
+  const interests   = [
+    ...(s.revealed_interests ?? []),
+    ...(s.hidden_interests   ?? []).map(i => `❓${i}`)
+  ].join(', ') || '—';
+
+  const actionBtns = `
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <button style="background:${canBribe ? 'rgba(255,215,0,0.15)' : 'rgba(255,255,255,0.05)'};
+                     border:1px solid ${canBribe ? '#FFD700' : '#555'};
+                     color:${canBribe ? '#FFD700' : '#888'};
+                     padding:5px 10px;border-radius:4px;cursor:${canBribe ? 'pointer' : 'not-allowed'};font-size:11px;"
+              onclick="senateBribe('${s.id}','${nationId}',${bribeAmount})"
+              ${canBribe ? '' : 'disabled'}>
+        💰 Подкупить (${bribeAmount} монет)
+      </button>
+      <button style="background:rgba(100,180,255,0.1);border:1px solid #4499ff;color:#88ccff;
+                     padding:5px 10px;border-radius:4px;cursor:pointer;font-size:11px;"
+              onclick="senateReveal('${s.id}','${nationId}')">
+        🔍 Разведать интересы
+      </button>
+    </div>
+    <div style="font-size:10px;color:#777;margin-top:5px;">
+      Интересы: ${interests} · Здоровье: ${s.health_points ?? '?'} · Влияние: ${s.influence ?? '?'}
+      ${isLeader ? ' · 👑 Лидер фракции' : ''}
+    </div>
+  `;
+
   let overlay = document.getElementById('senator-negotiate-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'senator-negotiate-overlay';
-    overlay.onclick = e => { if (e.target === overlay) closeActorNegotiation(); };
+    overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
     document.body.appendChild(overlay);
   }
-  overlay.innerHTML = renderActorNegotiationPanel(pseudo, nation);
+  overlay.innerHTML = renderActorNegotiationPanel(pseudo, nation) + actionBtns;
   overlay.style.display = 'flex';
+}
+
+// ── Подкуп сенатора ──────────────────────────────────────────────────
+function senateBribe(senatorId, nationId, amount) {
+  const mgr    = getSenateManager(nationId);
+  const nation = GAME_STATE.nations[nationId];
+  if (!mgr || !nation) return;
+
+  if ((nation.economy?.treasury ?? 0) < amount) {
+    addEventLog('💸 Казна пуста — подкуп невозможен.', 'warning');
+    return;
+  }
+
+  const result = mgr.attempt_bribe(senatorId, amount);
+  if (result.success || result.scandal) nation.economy.treasury -= amount;
+
+  if (result.success) {
+    addEventLog(
+      `💰 ${result.senator_name} принял ${amount} монет. Лояльность ${result.loyalty_before}% → ${result.loyalty_after}%.`,
+      'good'
+    );
+    mgr._recalculateSenateState();
+  } else if (result.scandal) {
+    addEventLog(
+      `😱 СКАНДАЛ! ${result.senator_name} разоблачил попытку подкупа. Честь Консула падает.`,
+      'danger'
+    );
+  } else {
+    addEventLog(`❌ ${result.senator_name} отказался от золота.`, 'warning');
+  }
+
+  document.getElementById('senator-negotiate-overlay').style.display = 'none';
+  renderAll();
+}
+
+// ── Разведка интересов сенатора ─────────────────────────────────────
+function senateReveal(senatorId, nationId) {
+  const mgr = getSenateManager(nationId);
+  if (!mgr) return;
+  const revealed = mgr.reveal_interests(senatorId);
+  const senator  = mgr.getSenatorById(senatorId);
+  if (revealed.length) {
+    addEventLog(
+      `🔍 Шпионы раскрыли интересы ${senator?.name ?? '?'}: ${revealed.join(', ')}.`,
+      'info'
+    );
+  } else {
+    addEventLog(`🔍 Ничего подозрительного в досье ${senator?.name ?? '?'} не найдено.`, 'info');
+  }
+  document.getElementById('senator-negotiate-overlay').style.display = 'none';
+  renderAll();
+}
+
+// ── «Предложить закон в Сенат» — выбор типа ─────────────────────────
+function openSenateLawProposal(nationId) {
+  const LAW_TYPES = [
+    { type: 'trade',     name: 'Торговый указ' },
+    { type: 'war',       name: 'Военные ассигнования' },
+    { type: 'build',     name: 'Строительная программа' },
+    { type: 'taxes',     name: 'Налоговая реформа' },
+    { type: 'religion',  name: 'Религиозный декрет' },
+    { type: 'diplomacy', name: 'Дипломатический договор' },
+    { type: 'reform',    name: 'Административная реформа' },
+  ];
+
+  let overlay = document.getElementById('senate-law-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'senate-law-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:2000;';
+    overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
+    document.body.appendChild(overlay);
+  }
+
+  overlay.innerHTML = `
+    <div style="background:#1a1a2e;border:1px solid rgba(255,255,255,0.2);border-radius:8px;padding:20px;max-width:360px;width:90%;">
+      <div style="font-size:14px;font-weight:bold;margin-bottom:12px;color:#eee;">📋 Вынести закон на голосование Сената</div>
+      ${LAW_TYPES.map(lt => `
+        <button onclick="submitSenateLaw('${nationId}','${lt.type}','${lt.name}')"
+                style="display:block;width:100%;margin-bottom:6px;padding:8px;
+                       background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);
+                       border-radius:4px;color:#ccc;cursor:pointer;text-align:left;font-size:12px;">
+          ${lt.name}
+        </button>
+      `).join('')}
+      <button onclick="document.getElementById('senate-law-overlay').style.display='none'"
+              style="margin-top:4px;padding:5px 12px;background:rgba(255,255,255,0.08);
+                     border:1px solid #555;border-radius:4px;color:#888;cursor:pointer;font-size:11px;">
+        Отмена
+      </button>
+    </div>
+  `;
+  overlay.style.display = 'flex';
+}
+
+function submitSenateLaw(nationId, lawType, lawName) {
+  document.getElementById('senate-law-overlay').style.display = 'none';
+  showVotingModal(nationId, {
+    id:               `LAW_${String(Date.now()).slice(-6)}`,
+    name:             lawName,
+    text:             `Консул выносит на голосование Сената: «${lawName}».`,
+    type:             lawType,
+    proposed_turn:    GAME_STATE.turn,
+    effects_per_turn: {},
+    requires_vote:    true,
+    vote:             null,
+  });
 }

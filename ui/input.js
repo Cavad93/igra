@@ -336,35 +336,75 @@ function showVotingModal(nationId, law) {
   if (!overlay) return;
 
   const nation = GAME_STATE.nations[nationId];
-  const characters = (nation.characters || []).filter(c => c.alive);
+  const mgr    = getSenateManager(nationId);
 
-  // Детерминированный подсчёт голосов
-  let votesFor = 0, votesAgainst = 0, votesAbstain = 0;
-  const speeches = [];
+  let votesFor, votesAgainst, votesAbstain, passed, vetoed = false, tribuneName = null;
+  let speeches = [];
+  let senateMode = false;
 
-  for (const char of characters) {
-    const vote = calculateCharacterVote(char, law);
-    if (vote === 'for' || vote === 'strongly_for') votesFor++;
-    else if (vote === 'against' || vote === 'strongly_against') votesAgainst++;
-    else votesAbstain++;
+  // ── Если у нации есть Сенат — используем SenateManager.process_vote() ──
+  if (mgr && nation.senate_config) {
+    senateMode = true;
+    const result = mgr.process_vote({
+      threshold:  law.threshold ?? 51,
+      law_type:   law.type ?? 'reform',
+      law_tags:   law.tags ?? [],
+    });
 
-    if (char.traits.ambition > 60 || char.traits.loyalty > 70) {
-      speeches.push({ name: char.name, portrait: char.portrait, vote, position: vote });
+    votesFor      = Math.round(result.for);
+    votesAgainst  = Math.round(result.against);
+    votesAbstain  = Math.round(result.abstain);
+    passed        = result.passed;
+    vetoed        = result.vetoed ?? false;
+    tribuneName   = result.tribune_name ?? null;
+
+    // Спикеры — материализованные сенаторы
+    speeches = (result.top_speakers ?? []).map(s => ({
+      name:     s.name,
+      portrait: s.portrait ?? '👤',
+      vote:     s.loyalty_score > 55 ? 'for' : 'against',
+    }));
+
+    // Обновляем настроение Сената после голосования
+    mgr._recalculateSenateState();
+
+  } else {
+    // ── Старая логика через nation.characters ──────────────────────
+    const characters = (nation.characters || []).filter(c => c.alive);
+    let charFor = 0, charAgainst = 0, charAbstain = 0;
+    for (const char of characters) {
+      const vote = calculateCharacterVote(char, law);
+      if (vote === 'for' || vote === 'strongly_for') charFor++;
+      else if (vote === 'against' || vote === 'strongly_against') charAgainst++;
+      else charAbstain++;
+      if (char.traits.ambition > 60 || char.traits.loyalty > 70) {
+        speeches.push({ name: char.name, portrait: char.portrait, vote });
+      }
     }
+    const total = characters.length || 1;
+    votesFor     = charFor;
+    votesAgainst = charAgainst;
+    votesAbstain = charAbstain;
+    passed       = charFor / total > 0.5;
   }
 
-  const total = characters.length || 1;
-  const passed = votesFor / total > 0.5;
+  const vetoNote = vetoed
+    ? `<div class="vote-veto">⚖️ Вето Трибуна (${tribuneName}): закон заблокирован!</div>`
+    : '';
+  const senateNote = senateMode
+    ? `<div class="vote-senate-note">🏛️ Голосует Сенат (${votesFor + votesAgainst + votesAbstain} голосов)</div>`
+    : '';
 
   overlay.innerHTML = `
     <div class="voting-modal">
       <div class="voting-title">⚖️ Голосование: ${law.name}</div>
-      <div class="voting-text">${law.text}</div>
+      <div class="voting-text">${law.text || ''}</div>
+      ${senateNote}
 
       <div class="vote-counts">
-        <span class="vote-for">✅ За: ${votesFor}</span>
-        <span class="vote-against">❌ Против: ${votesAgainst}</span>
-        <span class="vote-abstain">🔲 Воздержались: ${votesAbstain}</span>
+        <span class="vote-for">✅ За: ${Math.round(votesFor)}</span>
+        <span class="vote-against">❌ Против: ${Math.round(votesAgainst)}</span>
+        <span class="vote-abstain">🔲 Воздержались: ${Math.round(votesAbstain)}</span>
       </div>
 
       ${speeches.slice(0, 3).map(s => `
@@ -374,12 +414,14 @@ function showVotingModal(nationId, law) {
         </div>
       `).join('')}
 
+      ${vetoNote}
+
       <div class="vote-result ${passed ? 'passed' : 'failed'}">
         ${passed ? '✅ ЗАКОН ПРИНЯТ' : '❌ ЗАКОН ОТКЛОНЁН'}
       </div>
 
       <div class="voting-btns">
-        <button onclick="finalizeVote('${nationId}', ${JSON.stringify(law).replace(/"/g, '&quot;')}, ${votesFor}, ${votesAgainst}, ${votesAbstain}, ${passed})">
+        <button onclick="finalizeVote('${nationId}', ${JSON.stringify(law).replace(/"/g, '&quot;')}, ${Math.round(votesFor)}, ${Math.round(votesAgainst)}, ${Math.round(votesAbstain)}, ${passed})">
           Принять результат
         </button>
       </div>

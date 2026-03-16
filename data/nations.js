@@ -61,7 +61,14 @@ const INITIAL_GAME_STATE = {
           decay_per_turn: 2,
           restored_by: ['executions', 'military_victories', 'show_of_force'],
         },
-        elections: null,
+        elections: {
+          enabled: true,
+          frequency_turns: 48,      // раз в 4 года (4 × 12 ходов)
+          next_election: 48,
+          eligible_voters: 'senate',
+          offices: ['consul'],
+          last_consul: 'Агафокл',
+        },
         succession: null,
         conspiracies: {
           base_chance_per_turn: 0.15,
@@ -146,10 +153,22 @@ const INITIAL_GAME_STATE = {
       senate_config: {
         total_seats: 90,
         factions: [
-          { id: 'aristocrats', name: 'Аристократы',    seats: 30, color: '#9C27B0' },
-          { id: 'demos',       name: 'Народная партия', seats: 25, color: '#4CAF50' },
-          { id: 'military',    name: 'Военная фракция', seats: 22, color: '#f44336' },
-          { id: 'merchants',   name: 'Торговцы',        seats: 13, color: '#FF9800' },
+          { id: 'aristocrats', name: 'Аристократы',    seats: 30, color: '#9C27B0',
+            wants: ['land_reform', 'noble_privilege', 'tradition'],
+            fears: ['democracy', 'debt_cancellation', 'populism'],
+            preferred_law_types: ['reform', 'taxes'] },
+          { id: 'demos',       name: 'Народная партия', seats: 25, color: '#4CAF50',
+            wants: ['cheap_grain', 'public_works', 'debt_relief'],
+            fears: ['war', 'oligarchy', 'taxation'],
+            preferred_law_types: ['build', 'trade'] },
+          { id: 'military',    name: 'Военная фракция', seats: 22, color: '#f44336',
+            wants: ['war_funding', 'veteran_land', 'military_glory'],
+            fears: ['peace_treaty', 'budget_cuts', 'demobilization'],
+            preferred_law_types: ['war', 'build'] },
+          { id: 'merchants',   name: 'Торговцы',        seats: 13, color: '#FF9800',
+            wants: ['free_trade', 'port_expansion', 'low_tariffs'],
+            fears: ['war', 'grain_tax', 'piracy'],
+            preferred_law_types: ['trade', 'diplomacy'] },
         ],
         // 6 кланов — поперечны фракциям, связывают политику и кровь
         clans: [

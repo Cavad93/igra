@@ -170,8 +170,90 @@ function triggerConspiracy(nationId) {
 // ──────────────────────────────────────────────────────────────────────
 
 function triggerElection(nationId) {
-  if (nationId !== GAME_STATE.player_nation) return;
-  addEventLog('⚖️ Время выборов! Граждане собираются у ростр. Назначьте свою кандидатуру или оставьте всё как есть.', 'info');
+  const nation  = GAME_STATE.nations[nationId];
+  const gov     = nation.government;
+  const mgr     = getSenateManager(nationId);
+  const isPlayer = nationId === GAME_STATE.player_nation;
+
+  // ── Собираем кандидатов из материализованных сенаторов ───────────
+  const candidates = mgr
+    ? mgr.getMaterialized()
+        .filter(s => s.ambition_level >= 3)
+        .sort((a, b) =>
+          ((b.influence ?? 40) + b.loyalty_score + b.ambition_level * 15) -
+          ((a.influence ?? 40) + a.loyalty_score + a.ambition_level * 15)
+        )
+        .slice(0, 3)
+    : [];
+
+  if (!candidates.length) {
+    // Нет кандидатов — действующий правитель остаётся
+    if (isPlayer) addEventLog('⚖️ Выборы: других кандидатов не нашлось. Агафокл продолжает править.', 'info');
+    gov.elections.next_election = gov.elections.frequency_turns;
+    return;
+  }
+
+  // ── Голосование сенаторов по каждому кандидату ──────────────────
+  // Кандидат с наибольшей поддержкой побеждает.
+  let winner = null;
+  let winnerScore = -Infinity;
+
+  for (const candidate of candidates) {
+    // Базовая поддержка: лояльность фракционных коллег + личный авторитет
+    let support = 0;
+    if (mgr) {
+      for (const senator of mgr.senators) {
+        const sameF    = senator.faction_id === candidate.faction_id ? 20 : 0;
+        const sameClan = senator.clan_id === candidate.clan_id      ? 15 : 0;
+        const base     = senator.loyalty_score * 0.4 + (candidate.influence ?? 40) * 0.3;
+        support += base + sameF + sameClan + (Math.random() - 0.5) * 20;
+      }
+    }
+    if (support > winnerScore) { winnerScore = support; winner = candidate; }
+  }
+
+  if (!winner) return;
+
+  // ── Применяем результат ──────────────────────────────────────────
+  const prevConsul    = gov.elections?.last_consul ?? gov.ruler?.name ?? 'прежний консул';
+  const isNewConsul   = winner.name !== prevConsul;
+
+  if (isNewConsul) {
+    gov.ruler = gov.ruler ?? {};
+    gov.ruler.name         = winner.name;
+    gov.ruler.character_id = winner.character_id ?? null;
+
+    gov.elections.last_consul = winner.name;
+
+    // Легитимность растёт при честных выборах
+    gov.legitimacy = Math.min(100, (gov.legitimacy ?? 50) + 8);
+
+    // Проигравшие кандидаты — -5 лояльности (обида)
+    if (mgr) {
+      for (const loser of candidates) {
+        if (loser.id !== winner.id) loser.loyalty_score = Math.max(0, loser.loyalty_score - 5);
+      }
+      // Победитель становится лидером своей фракции
+      mgr._electFactionLeader(winner.faction_id, 'election');
+      mgr._recalculateSenateState();
+    }
+
+    if (isPlayer) {
+      const candidateNames = candidates.map(c => c.name).join(', ');
+      addEventLog(
+        `⚖️ ВЫБОРЫ КОНСУЛА: кандидаты — ${candidateNames}. Сенат проголосовал. ` +
+        `Победитель: ${winner.name} (${mgr?._factionName(winner.faction_id) ?? ''}). Легитимность +8.`,
+        'law'
+      );
+    }
+  } else {
+    if (isPlayer) {
+      addEventLog(`⚖️ Выборы: ${winner.name} переизбран консулом. Сенат доволен преемственностью.`, 'law');
+    }
+    gov.legitimacy = Math.min(100, (gov.legitimacy ?? 50) + 3);
+  }
+
+  gov.elections.next_election = gov.elections.frequency_turns;
 }
 
 // ──────────────────────────────────────────────────────────────────────

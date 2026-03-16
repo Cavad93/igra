@@ -283,6 +283,8 @@ class SenateManager {
           s.loyalty_score = Math.min(100, s.loyalty_score + 3);
         }
       }
+      // Обновляем настроение Сената после смены власти
+      this._recalculateSenateState();
     }
 
     return newLeader;
@@ -346,10 +348,11 @@ class SenateManager {
   // ГЕТТЕРЫ
   // ══════════════════════════════════════════════════════════════════════
 
-  getSenatorById(id)          { return this.senators.find(s => s.id === id) ?? null; }
-  getMaterialized()           { return this.senators.filter(s => s.materialized); }
-  getGhostsByFaction(fId)     { return this.senators.filter(s => s.faction_id === fId && !s.materialized); }
-  getClanMembers(clanId)      { return this.senators.filter(s => s.clan_id === clanId); }
+  getSenatorById(id)              { return this.senators.find(s => s.id === id) ?? null; }
+  getSenatorByCharacterId(charId) { return this.senators.find(s => s.character_id === charId) ?? null; }
+  getMaterialized()               { return this.senators.filter(s => s.materialized); }
+  getGhostsByFaction(fId)         { return this.senators.filter(s => s.faction_id === fId && !s.materialized); }
+  getClanMembers(clanId)          { return this.senators.filter(s => s.clan_id === clanId); }
 
   _factionName(fId) { return this.factions.find(f => f.id === fId)?.name ?? fId; }
   _clanName(cId)    { return this.clans[cId]?.name ?? cId ?? '?'; }
@@ -446,25 +449,44 @@ class SenateManager {
   // }
   process_vote(proposal = {}) {
     const threshold  = (proposal.threshold ?? 51) / 100;
-    const mods       = proposal.faction_modifiers ?? {};
+    const mods       = { ...(proposal.faction_modifiers ?? {}) };
     const lawType    = proposal.law_type ?? null;
 
-    // Система голосования из StateArchitecture (Plutocracy / Meritocracy / Democracy)
+    // Система голосования из StateArchitecture
     const arch         = GAME_STATE?.nations[this.nationId]?.senate_config?.state_architecture;
     const votingSystem = arch?.voting_system ?? 'Meritocracy';
+
+    // ── 7. Фракционная лояльность → автоматический модификатор ───────
+    // Высокая ср. лояльность фракции = бонус к голосам «за»; низкая = штраф.
+    const factionStats = this.getFactionStats();
+    for (const faction of this.factions) {
+      const avgLoy = factionStats[faction.id]?.avg_loyalty ?? 50;
+      const loyMod = Math.round((avgLoy - 50) * 0.30); // диапазон ≈ −15…+15
+      mods[faction.id] = (mods[faction.id] ?? 0) + loyMod;
+    }
+
+    // ── 8. Коалиции фракций ───────────────────────────────────────────
+    const coalitions = this._detectVotingCoalitions(lawType);
+    const coalitionBonus = {}; // faction_id → ±delta (pp)
+    for (const [f1, f2, direction] of coalitions) {
+      coalitionBonus[f1] = (coalitionBonus[f1] ?? 0) + direction * 15;
+      coalitionBonus[f2] = (coalitionBonus[f2] ?? 0) + direction * 15;
+    }
+    for (const [fId, bonus] of Object.entries(coalitionBonus)) {
+      mods[fId] = (mods[fId] ?? 0) + bonus;
+    }
 
     let totalFor = 0, totalAgainst = 0, totalAbstain = 0;
 
     for (const senator of this.senators) {
-      // Базовая поддержка = loyalty (0–1)
       let support = senator.loyalty_score / 100;
 
-      // Фракционный модификатор
+      // Фракционный модификатор (включает avg_loyalty + коалиции)
       if (mods[senator.faction_id] !== undefined) {
         support = Math.max(0, Math.min(1, support + mods[senator.faction_id] / 100));
       }
 
-      // Персональный модификатор (traits + hidden_interests + clan)
+      // Персональный модификатор (traits + hidden_interests + клан)
       if (lawType) {
         const modifier = this.calculate_vote_modifier(senator, proposal);
         support = Math.max(0, Math.min(1, support + modifier / 100));
@@ -476,10 +498,7 @@ class SenateManager {
         support  = Math.max(0, Math.min(1, support));
       }
 
-      // Вес голоса по системе голосования:
-      //   Plutocracy  — богатые х3, остальные х1
-      //   Meritocracy — честолюбивые получают х1.0…х1.5
-      //   Democracy   — все равны (х1)
+      // Вес голоса
       let weight = 1;
       if (votingSystem === 'Plutocracy') {
         const isWealthy = (senator.traits ?? []).some(t =>
@@ -487,9 +506,8 @@ class SenateManager {
         ) || (senator.wealth ?? 0) > 7000;
         weight = isWealthy ? 3 : 1;
       } else if (votingSystem === 'Meritocracy') {
-        weight = 1 + Math.round(senator.ambition_level / 5 * 5) / 10; // 1.0–2.0
+        weight = 1 + Math.round(senator.ambition_level / 5 * 5) / 10;
       }
-      // Democracy: weight stays 1
 
       const roll = Math.random();
       if      (roll < support)       totalFor     += weight;
@@ -498,8 +516,43 @@ class SenateManager {
     }
 
     const total     = totalFor + totalAgainst + totalAbstain;
-    const passed    = total > 0 && (totalFor / total) >= threshold;
+    let   passed    = total > 0 && (totalFor / total) >= threshold;
     const marginPct = total > 0 ? Math.round((totalFor / total) * 100) : 0;
+
+    // ── 4. Право вето Народного Трибуна ───────────────────────────────
+    let vetoed     = false;
+    let tribuneName = null;
+    if (passed && arch?.veto_rights) {
+      // Трибун — сенатор из фракции demos с высоким честолюбием и низкой лояльностью
+      const tribune = this.senators
+        .filter(s => s.faction_id === 'demos' && s.materialized &&
+                     s.ambition_level >= 3 && s.loyalty_score < 45)
+        .sort((a, b) => b.ambition_level - a.ambition_level)[0];
+
+      // Шанс вето: 15–45% зависит от margin (чем убедительнее — тем меньше шанс)
+      const vetoChance = Math.max(0.05, 0.45 - marginPct / 200);
+      if (tribune && Math.random() < vetoChance) {
+        passed      = false;
+        vetoed      = true;
+        tribuneName = tribune.name ?? 'Народный Трибун';
+        if (this.nationId === GAME_STATE.player_nation) {
+          addEventLog(
+            `⚖️ ВЕТО! ${tribuneName} поднял жезл трибуна — закон заблокирован, несмотря на большинство (${marginPct}% «за»).`,
+            'warning'
+          );
+        }
+      }
+    }
+
+    // Лог коалиций для игрока
+    if (coalitions.length && this.nationId === GAME_STATE.player_nation) {
+      for (const [f1, f2, dir] of coalitions) {
+        addEventLog(
+          `🤝 Коалиция: «${this._factionName(f1)}» и «${this._factionName(f2)}» голосуют вместе (${dir > 0 ? '«за»' : '«против»'}).`,
+          'info'
+        );
+      }
+    }
 
     return {
       for:          totalFor,
@@ -508,10 +561,32 @@ class SenateManager {
       total,
       passed,
       margin_pct:   marginPct,
+      vetoed,
+      tribune_name: tribuneName,
+      coalitions,
       top_speakers: this._getTopSpeakers(3),
-      // Контекст для LLM-нарратива (без hidden_interests — не раскрываем)
       narrative_context: this.getVoteNarrativeContext(proposal, { passed, marginPct }),
     };
+  }
+
+  // ── 8. Обнаружение коалиций перед голосованием ──────────────────────
+  // Возвращает массив [faction_id_1, faction_id_2, direction (+1/-1)]
+  _detectVotingCoalitions(lawType) {
+    const ALIGNMENTS = {
+      // [lawType]: [[f1, f2, direction]] — фракции с общими интересами по типу закона
+      war:        [['military', 'aristocrats', +1], ['demos', 'merchants', -1]],
+      taxes:      [['demos', 'military', +1],       ['merchants', 'aristocrats', -1]],
+      trade:      [['merchants', 'demos', +1],      ['military', 'aristocrats', -1]],
+      religion:   [['aristocrats', 'demos', +1]],
+      reform:     [['demos', 'merchants', +1],      ['aristocrats', 'military', -1]],
+      build:      [['demos', 'merchants', +1]],
+      diplomacy:  [['merchants', 'demos', +1],      ['military', -1]],
+    };
+
+    const raw = ALIGNMENTS[lawType] ?? [];
+    // Фильтруем: обе фракции должны существовать в сенате
+    const factionIds = new Set(this.factions.map(f => f.id));
+    return raw.filter(([f1, f2]) => factionIds.has(f1) && factionIds.has(f2));
   }
 
   // Итоговый модификатор голоса одного сенатора (−100…+100).
@@ -756,6 +831,84 @@ class SenateManager {
 
     // Проверяем смену лидеров фракций (каждый ход: вакансия/гибель; раз в 24 хода: вызов)
     this._checkFactionLeadershipChanges(isPlayer);
+
+    // ── 10. Фракционные инициативы — раз в 15 ходов (~1.25 года) ───
+    if (turn % 15 === 0) {
+      this._triggerFactionInitiative(isPlayer);
+    }
+  }
+
+  // ── 10. Фракция выдвигает законопроект ──────────────────────────────
+  _triggerFactionInitiative(isPlayer) {
+    // Выбираем активную фракцию с лидером и программой wants[]
+    const eligible = this.factions.filter(f => {
+      const leader = this.getFactionLeader(f.id);
+      return leader && f.wants?.length;
+    });
+    if (!eligible.length) return;
+
+    const faction = eligible[Math.floor(Math.random() * eligible.length)];
+    const leader  = this.getFactionLeader(faction.id);
+    const lawType = (faction.preferred_law_types ?? ['reform'])[
+      Math.floor(Math.random() * (faction.preferred_law_types?.length ?? 1))
+    ];
+    const wantKey = faction.wants[Math.floor(Math.random() * faction.wants.length)];
+
+    // Фракционные модификаторы: сама фракция горячо «за», остальные — нет
+    const factionMods = {};
+    for (const f of this.factions) {
+      factionMods[f.id] = f.id === faction.id ? 35 : -10;
+    }
+
+    const result = this.process_vote({
+      threshold:         51,
+      law_type:          lawType,
+      faction_modifiers: factionMods,
+    });
+
+    if (isPlayer) {
+      const lawNames = {
+        land_reform:      'земельная реформа',
+        noble_privilege:  'привилегии знати',
+        cheap_grain:      'субсидии на зерно',
+        public_works:     'общественные работы',
+        debt_relief:      'облегчение долгов',
+        war_funding:      'военные ассигнования',
+        veteran_land:     'земли ветеранам',
+        free_trade:       'свободная торговля',
+        port_expansion:   'расширение портов',
+        tradition:        'охрана традиций',
+      };
+      const lawName = lawNames[wantKey] ?? wantKey.replace(/_/g, ' ');
+
+      if (result.passed) {
+        addEventLog(
+          `📋 ${leader.name} (${faction.name}) добился принятия «${lawName}» (${result.margin_pct}% «за»). Закон вступает в силу.`,
+          'law'
+        );
+        // Небольшой эффект на экономику/стабильность нации
+        const nation = GAME_STATE.nations[this.nationId];
+        if (nation?.government) {
+          nation.government.legitimacy = Math.min(100, (nation.government.legitimacy ?? 50) + 3);
+        }
+      } else {
+        addEventLog(
+          `📋 ${leader.name} (${faction.name}) вынес на голосование «${lawName}» — отклонено (${result.margin_pct}% «за»).`,
+          'warning'
+        );
+        // Неудача снижает лояльность лидера
+        leader.loyalty_score = Math.max(0, leader.loyalty_score - 4);
+      }
+
+      if (result.vetoed) {
+        addEventLog(
+          `⚖️ ${result.tribune_name} заблокировал инициативу «${faction.name}» правом вето.`,
+          'warning'
+        );
+      }
+    }
+
+    this._recalculateSenateState();
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -862,6 +1015,9 @@ class SenateManager {
         addEventLog(`🏛️ Место займёт представитель рода ${successor.dynasty} (${clanName}).`, 'info');
       }
     }
+
+    // Ежегодно пересчитываем настроение Сената
+    this._recalculateSenateState();
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -1001,6 +1157,46 @@ class SenateManager {
 
   updateGlobalState(description) {
     this.global_senate_state = description;
+  }
+
+  // ── 6. Пересчёт настроения Сената по реальным данным ─────────────
+  // Вызывается при: смене лидера, Blood_Feud, Vendetta, выборах, ежегодно.
+  _recalculateSenateState() {
+    const senators = this.senators;
+    if (!senators.length) return;
+
+    const avgLoyalty = Math.round(
+      senators.reduce((a, s) => a + s.loyalty_score, 0) / senators.length
+    );
+    const bloodFeudCount  = Object.values(this.clans).filter(c => c.blood_feud).length;
+    const vendettaCount   = Object.values(this.clans).filter(c => c.vendetta).length;
+    const conspiratorCount = senators.filter(s =>
+      (s.hidden_interests ?? []).includes('Blood_Feud') ||
+      (s.revealed_interests ?? []).includes('Conspirator')
+    ).length;
+
+    let state;
+    if (avgLoyalty < 20) {
+      state = 'Сенат на грани мятежа. Доверие к власти уничтожено.';
+    } else if (avgLoyalty < 35) {
+      state = 'Открытая враждебность. Фракции не скрывают ненависти к Консулу.';
+    } else if (bloodFeudCount >= 2 || vendettaCount >= 2) {
+      state = 'Зал залит ядом вендетты. Кровная месть определяет каждое голосование.';
+    } else if (conspiratorCount >= 3) {
+      state = 'Шёпот заговоров стелется между колоннами. Никто не доверяет соседу.';
+    } else if (bloodFeudCount > 0 || vendettaCount > 0) {
+      state = 'Напряжённость нарастает. Старые обиды не дают сенату покоя.';
+    } else if (avgLoyalty < 50) {
+      state = 'Сенат расколот. Фракции спорят громко, компромиссы даются с трудом.';
+    } else if (avgLoyalty < 65) {
+      state = 'Сенат спокоен. Политическая жизнь идёт своим чередом.';
+    } else if (avgLoyalty < 80) {
+      state = 'Сенаторы сплочены вокруг Консула. Законы проходят без труда.';
+    } else {
+      state = 'Единодушие редкое — Консул на вершине влияния. Сенат ему в руки.';
+    }
+
+    this.global_senate_state = state;
   }
 
   toJSON() {

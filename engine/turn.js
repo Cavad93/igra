@@ -135,6 +135,21 @@ function checkCharacterDeaths() {
       if (char.health < 10) {
         char.alive = false;
         addEventLog(`${char.name} скончался в возрасте ${char.age} лет.`, 'character');
+
+        // Синхронизация с Сенатом: если персонаж был сенатором — заменяем призраком
+        const mgr = getSenateManager(nationId);
+        if (mgr) {
+          const senator = mgr.getSenatorByCharacterId(char.id);
+          if (senator) {
+            mgr.replace_senator(senator, 'death');
+            if (nationId === GAME_STATE.player_nation) {
+              addEventLog(
+                `🏛️ Место ${char.name} в Сенате освободилось. Фракция ${mgr._factionName(senator.faction_id)} ищет преемника.`,
+                'character'
+              );
+            }
+          }
+        }
       }
     }
   }
@@ -314,7 +329,12 @@ function triggerRandomEvent() {
 
 function saveGame() {
   try {
-    const saveData = JSON.stringify(GAME_STATE);
+    // Сериализуем SENATE_MANAGERS отдельно (они не входят в GAME_STATE)
+    const senateData = {};
+    for (const [nationId, mgr] of Object.entries(SENATE_MANAGERS)) {
+      senateData[nationId] = mgr.toJSON();
+    }
+    const saveData = JSON.stringify({ ...GAME_STATE, _senate: senateData });
     localStorage.setItem(CONFIG.SAVE_KEY, saveData);
   } catch (e) {
     console.warn('Не удалось сохранить игру:', e);
@@ -326,6 +346,20 @@ function loadGame() {
     const saved = localStorage.getItem(CONFIG.SAVE_KEY);
     if (saved) {
       const loadedState = JSON.parse(saved);
+
+      // Восстанавливаем SENATE_MANAGERS до Object.assign,
+      // чтобы initSenateForNation() не перезаписывал их заново
+      if (loadedState._senate) {
+        for (const [nationId, data] of Object.entries(loadedState._senate)) {
+          try {
+            SENATE_MANAGERS[nationId] = SenateManager.fromJSON(data);
+          } catch (e) {
+            console.warn(`Не удалось восстановить сенат ${nationId}:`, e);
+          }
+        }
+        delete loadedState._senate;
+      }
+
       Object.assign(GAME_STATE, loadedState);
       _migrateCharacterIds();
       _sanitizeInstitutions();
