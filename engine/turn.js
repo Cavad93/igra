@@ -320,8 +320,8 @@ function loadGame() {
     const saved = localStorage.getItem(CONFIG.SAVE_KEY);
     if (saved) {
       const loadedState = JSON.parse(saved);
-      // Переносим данные в GAME_STATE
       Object.assign(GAME_STATE, loadedState);
+      _migrateCharacterIds();
       addEventLog('Игра загружена из сохранения.', 'info');
       return true;
     }
@@ -329,6 +329,35 @@ function loadGame() {
     console.warn('Не удалось загрузить игру:', e);
   }
   return false;
+}
+
+// После загрузки сохранения: если институты существуют но character_ids пустые,
+// заполняем их из nation.characters (персонажи уже загружены из INITIAL_*)
+function _migrateCharacterIds() {
+  const INST_CHARS = {
+    INST_strategos:       ['CHAR_0001','CHAR_0002','CHAR_0003','CHAR_0004','CHAR_0005'],
+    INST_senate:          ['ROME_SEN_001','ROME_SEN_002','ROME_SEN_003','ROME_SEN_004','ROME_SEN_005','ROME_SEN_006','ROME_SEN_007','ROME_SEN_008','ROME_SEN_009'],
+    INST_council_hundred: ['CARTH_OLI_001','CARTH_OLI_002','CARTH_OLI_003','CARTH_OLI_004','CARTH_OLI_005','CARTH_OLI_006'],
+    INST_royal_court_eg:  ['EGY_CRT_001','EGY_CRT_002','EGY_CRT_003','EGY_CRT_004','EGY_CRT_005'],
+    INST_hetairoi:        ['MAC_HTR_001','MAC_HTR_002','MAC_HTR_003','MAC_HTR_004','MAC_HTR_005'],
+    INST_elder_council:   ['NUM_ELD_001','NUM_ELD_002','NUM_ELD_003','NUM_ELD_004'],
+  };
+
+  for (const nation of Object.values(GAME_STATE.nations)) {
+    for (const inst of (nation.government?.institutions ?? [])) {
+      if ((!inst.character_ids || inst.character_ids.length === 0) && INST_CHARS[inst.id]) {
+        inst.character_ids = INST_CHARS[inst.id];
+      }
+    }
+    // Для нумидии — и в ruler.character_ids
+    if (!nation.government?.ruler?.character_ids?.length) {
+      const rulerIds = { numidia: ['NUM_ELD_001','NUM_ELD_002','NUM_ELD_003','NUM_ELD_004'] };
+      const nationKey = Object.keys(GAME_STATE.nations).find(k => GAME_STATE.nations[k] === nation);
+      if (nationKey && rulerIds[nationKey]) {
+        nation.government.ruler.character_ids = rulerIds[nationKey];
+      }
+    }
+  }
 }
 
 // ──────────────────────────────────────────────────────────────

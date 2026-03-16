@@ -771,17 +771,22 @@ function buildRoyalCourtContent(gov, nation) {
 
 // ── ЗАЛ СЕНАТА (республика) ──────────────────────────────────────────
 function buildSenateContent(gov, nation) {
-  const senateInst = (gov.institutions ?? []).find(
-    i => i.character_ids?.length && (i.type === 'legislative' || i.type === 'advisory')
-  );
-  if (!senateInst) return renderEmptyHall('Сенат не учреждён.');
+  // Ищем любой институт с привязанными персонажами
+  const senateInst = (gov.institutions ?? []).find(i => i.character_ids?.length) ?? null;
 
-  const senators = (nation.characters ?? []).filter(c => senateInst.character_ids?.includes(c.id));
-  if (!senators.length) return renderEmptyHall('Сенаторы не назначены. Используйте ✨ Созвать советников.');
+  // Все персонажи нации как запасной вариант (работает после реформ и при загрузке сохранений)
+  const senators = senateInst
+    ? (nation.characters ?? []).filter(c => senateInst.character_ids.includes(c.id))
+    : (nation.characters ?? []);
+
+  if (!senators.length) return renderEmptyHall('Членов нет. Используйте ✨ Созвать советников.');
+
+  // Передаём фракции из найденного института или пустой массив
+  const instFactions = senateInst?.factions ?? [];
 
   // Группируем по фракциям
   const byFaction = {};
-  for (const f of (senateInst.factions ?? [])) byFaction[f.name] = { faction: f, senators: [] };
+  for (const f of instFactions) byFaction[f.name] = { faction: f, senators: [] };
   if (!Object.keys(byFaction).length) byFaction[''] = { faction: { name: 'Сенат' }, senators: [] };
 
   for (const s of senators) {
