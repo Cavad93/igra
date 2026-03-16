@@ -3,7 +3,12 @@ const CONFIG = {
   // Установите свой ключ API Anthropic здесь или через UI
   API_KEY: '',
   API_URL: 'https://api.anthropic.com/v1/messages',
-  MODEL: 'claude-sonnet-4-20250514',
+
+  // Haiku 4.5 — быстрые задачи: парсинг команд, реакции персонажей, генерация
+  MODEL_HAIKU: 'claude-haiku-4-5-20251001',
+
+  // Sonnet 4.6 — сложные задачи: дипломатия, решения AI-наций, управление государством
+  MODEL_SONNET: 'claude-sonnet-4-6',
 
   BALANCE: {
     // Потребление населения за ход

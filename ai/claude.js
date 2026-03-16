@@ -5,7 +5,7 @@
 // БАЗОВАЯ ФУНКЦИЯ ВЫЗОВА API
 // ──────────────────────────────────────────────────────────────
 
-async function callClaude(system, user, maxTokens = 1024) {
+async function callClaude(system, user, maxTokens = 1024, model = CONFIG.MODEL_HAIKU) {
   if (!CONFIG.API_KEY) {
     throw new Error('API ключ не установлен');
   }
@@ -19,7 +19,7 @@ async function callClaude(system, user, maxTokens = 1024) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: CONFIG.MODEL,
+      model,
       max_tokens: maxTokens,
       system,
       messages: [
@@ -83,7 +83,7 @@ async function parsePlayerCommand(playerInput) {
 
   const prompt = PROMPTS.parseCommand(playerInput, stateSlice);
 
-  const rawResponse = await callClaude(prompt.system, prompt.user, 800);
+  const rawResponse = await callClaude(prompt.system, prompt.user, 800, CONFIG.MODEL_HAIKU);
   const parsed = parseAIResponse(rawResponse);
 
   if (!validateCommandParse(parsed)) {
@@ -110,7 +110,7 @@ async function getCharacterReactions(action, characters, politicalContext) {
     const prompt = PROMPTS.characterReaction(action, char, personalImpact, politicalContext);
 
     try {
-      const rawResponse = await callClaude(prompt.system, prompt.user, 400);
+      const rawResponse = await callClaude(prompt.system, prompt.user, 400, CONFIG.MODEL_HAIKU);
       const parsed = parseAIResponse(rawResponse);
 
       if (validateCharacterReaction(parsed)) {
@@ -206,7 +206,7 @@ async function getAINationDecision(nationId) {
 
   const prompt = PROMPTS.nationDecision(nationId, nation, neighborsSummary, availableActions);
 
-  const rawResponse = await callClaude(prompt.system, prompt.user, 300);
+  const rawResponse = await callClaude(prompt.system, prompt.user, 300, CONFIG.MODEL_SONNET);
   const decision = parseAIResponse(rawResponse);
 
   if (validateNationDecision(decision)) {
@@ -258,7 +258,7 @@ async function generateCharactersForNation(nationId, count = 7) {
 
   addEventLog('Генерирую персонажей двора через Claude...', 'ai');
 
-  const rawResponse = await callClaude(prompt.system, prompt.user, 2500);
+  const rawResponse = await callClaude(prompt.system, prompt.user, 2500, CONFIG.MODEL_HAIKU);
   const characters = parseAIResponse(rawResponse);
   const validated = validateCharacters(characters);
 
@@ -281,7 +281,7 @@ async function generateNewCharacter(nationId) {
 
   const prompt = PROMPTS.generateCharacters(1, nationId, nation, existing);
 
-  const rawResponse = await callClaude(prompt.system, prompt.user, 600);
+  const rawResponse = await callClaude(prompt.system, prompt.user, 600, CONFIG.MODEL_HAIKU);
   const characters = parseAIResponse(rawResponse);
   const validated = validateCharacters(characters);
 
@@ -323,7 +323,7 @@ async function parseGovernmentDescription(playerInput) {
 
   let raw;
   try {
-    raw = await callClaude(system, user, 1200);
+    raw = await callClaude(system, user, 1200, CONFIG.MODEL_SONNET);
   } catch (err) {
     console.warn('parseGovernmentDescription API error:', err);
     throw new Error('Не удалось связаться с AI. Проверьте API ключ.');
@@ -350,7 +350,7 @@ async function getGovernmentChangeReactions(fromType, toType) {
 
   let raw;
   try {
-    raw = await callClaude(system, user, 1500);
+    raw = await callClaude(system, user, 1500, CONFIG.MODEL_HAIKU);
   } catch (err) {
     console.warn('getGovernmentChangeReactions API error:', err);
     // Fallback: детерминированные реакции
@@ -401,7 +401,7 @@ async function simulateInstitutionVote(proposalText, institutionId, calculatedEf
 
   let raw;
   try {
-    raw = await callClaude(system, user, 1000);
+    raw = await callClaude(system, user, 1000, CONFIG.MODEL_SONNET);
   } catch (err) {
     console.warn('simulateInstitutionVote API error:', err);
     return { ...voteResult, key_speeches: [], amendments_proposed: [], unexpected_events: [] };
