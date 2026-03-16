@@ -192,9 +192,11 @@ function renderCouncilRuler(ruler, nation) {
   // Ищем nationId по объекту нации, чтобы получить реальное число сенаторов
   const nationId    = Object.keys(GAME_STATE.nations).find(k => GAME_STATE.nations[k] === nation);
   const senateMgr   = nationId ? getSenateManager(nationId) : null;
-  const sc          = nationId ? GAME_STATE.nations[nationId]?.senate_config : null;
-  const memberCount = sc?.total_seats
-    ?? (senateMgr ? senateMgr.senators.length : (ruler.character_ids?.length || null));
+  const _govInsts   = nation?.government?.institutions ?? [];
+  const _factionInst = _govInsts.find(i => i.factions?.some(f => f.seats));
+  const memberCount = _factionInst
+    ? _factionInst.factions.reduce((s, f) => s + (f.seats ?? 0), 0)
+    : (senateMgr ? senateMgr.senators.length : (ruler.character_ids?.length || null));
 
   const memberStr = memberCount != null ? memberCount : 'неизвестно';
 
@@ -1575,8 +1577,15 @@ function renderSenateLazyBlock(nationId) {
 
   const stats       = mgr.getFactionStats();
   const materialized = mgr.getMaterialized();
-  const total        = mgr.senators.length;
   const matCount     = materialized.length;
+
+  // Берём канонический total из government.institutions (то же что SVG-парламент)
+  const _nation2    = GAME_STATE.nations[nationId];
+  const _govInsts2  = _nation2?.government?.institutions ?? [];
+  const _fInst2     = _govInsts2.find(i => i.factions?.some(f => f.seats));
+  const total       = _fInst2
+    ? _fInst2.factions.reduce((s, f) => s + (f.seats ?? 0), 0)
+    : mgr.senators.length;
 
   // Фракционная полоска распределения мест
   const factionBars = mgr.factions.map(f => {
