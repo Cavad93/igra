@@ -419,7 +419,8 @@ async function getGovernmentChangeReactions(fromType, toType) {
 }
 
 // 3. ГОЛОСОВАНИЕ В КОЛЛЕГИАЛЬНОМ ОРГАНЕ (Claude пишет речи)
-async function simulateInstitutionVote(proposalText, institutionId, calculatedEffects) {
+//    proposal: { text, law_type, faction_modifiers, threshold }
+async function simulateInstitutionVote(proposalText, institutionId, calculatedEffects, proposal = {}) {
   const nation = GAME_STATE.nations[GAME_STATE.player_nation];
   const gov    = nation.government;
   const inst   = (gov.institutions ?? []).find(i => i.id === institutionId);
@@ -428,11 +429,35 @@ async function simulateInstitutionVote(proposalText, institutionId, calculatedEf
   // Код считает голоса детерминированно
   const voteResult = calculateInstitutionVote(inst, nation);
 
-  const members = (nation.characters ?? [])
-    .filter(c => c.alive)
-    .map(c => ({ id: c.id, name: c.name, traits: c.traits, wants: c.wants, fears: c.fears }));
+  // Если есть SenateManager — используем его умное голосование поверх базового
+  const senateMgr  = getSenateManager(GAME_STATE.player_nation);
+  let narrativeCtx = null;
+  if (senateMgr && proposal.law_type) {
+    const senateVote = senateMgr.process_vote(proposal);
+    // Обновляем глобальное настроение сената по итогам
+    const moodText = senateVote.passed
+      ? `Сенат поддержал ${proposal.law_type}-закон (${senateVote.margin_pct}% «за»).`
+      : `Сенат отклонил ${proposal.law_type}-закон (лишь ${senateVote.margin_pct}% «за»).`;
+    senateMgr.updateGlobalState(moodText);
+    narrativeCtx = senateVote.narrative_context;
+  }
 
-  const { system, user } = PROMPTS.institutionVote(proposalText, inst, members, calculatedEffects, voteResult);
+  // Для LLM берём только 3 топ-спикера (экономия токенов)
+  const members = senateMgr
+    ? senateMgr._getTopSpeakers(3).map(s => ({
+        id:     null,
+        name:   s.name,
+        traits: s.traits,
+        wants:  [],
+        fears:  [],
+      }))
+    : (nation.characters ?? [])
+        .filter(c => c.alive)
+        .map(c => ({ id: c.id, name: c.name, traits: c.traits, wants: c.wants, fears: c.fears }));
+
+  const { system, user } = PROMPTS.institutionVote(
+    proposalText, inst, members, calculatedEffects, voteResult, narrativeCtx
+  );
 
   let raw;
   try {

@@ -275,7 +275,7 @@ ${JSON.stringify(characters.map(c => ({
   // ──────────────────────────────────────────────────────────
   // 7. ПРАВИТЕЛЬСТВО — ГОЛОСОВАНИЕ В ИНСТИТУТЕ
   // ──────────────────────────────────────────────────────────
-  institutionVote: (proposalText, institution, members, calculatedEffects, voteResult) => ({
+  institutionVote: (proposalText, institution, members, calculatedEffects, voteResult, narrativeContext) => ({
     system: `Ты — нарратор политических дебатов в античном мире 301 BC.
 Голоса уже посчитаны кодом — ты пишешь только речи и нарратив.
 Отвечай ТОЛЬКО JSON. Никаких пояснений.
@@ -285,7 +285,7 @@ ${JSON.stringify(characters.map(c => ({
 
 ИНСТИТУТ: ${institution.name} (${institution.decision_method})
 
-УЧАСТНИКИ:
+УЧАСТНИКИ (3 наиболее влиятельных):
 ${JSON.stringify(members, null, 2)}
 
 ЭФФЕКТЫ (если пройдёт):
@@ -294,6 +294,12 @@ ${JSON.stringify(calculatedEffects, null, 2)}
 РЕЗУЛЬТАТ ГОЛОСОВАНИЯ (уже посчитан):
 ${JSON.stringify(voteResult, null, 2)}
 
+${narrativeContext ? `ПОЛИТИЧЕСКИЙ КОНТЕКСТ СЕНАТА:
+- Закон ${narrativeContext.result} (${narrativeContext.margin_pct ?? '?'}% голосов)
+- Наибольшая оппозиция: клан «${narrativeContext.opposed_clan ?? '—'}»${narrativeContext.revealed_interest ? ` (интерес: ${narrativeContext.revealed_interest})` : ''}
+- Наибольшая поддержка: клан «${narrativeContext.support_clan ?? '—'}»
+- Настроение сената: "${narrativeContext.senate_mood}"
+` : ''}
 Напиши нарратив голосования. Верни JSON:
 {
   "key_speeches": [

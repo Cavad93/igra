@@ -151,6 +151,15 @@ const INITIAL_GAME_STATE = {
           { id: 'military',    name: 'Военная фракция', seats: 22, color: '#f44336' },
           { id: 'merchants',   name: 'Торговцы',        seats: 13, color: '#FF9800' },
         ],
+        // 6 кланов — поперечны фракциям, связывают политику и кровь
+        clans: [
+          { id: 'clan_agathocles', name: 'Клан Агафокла',       color: '#8B0000' },
+          { id: 'clan_gastron',    name: 'Дом Гастрона',         color: '#4A90D9' },
+          { id: 'clan_kephalos',   name: 'Род Кефала',           color: '#7B68EE' },
+          { id: 'clan_philistos',  name: 'Семья Филиста',        color: '#2E8B57' },
+          { id: 'clan_old_blood',  name: 'Старая Кровь',         color: '#B8860B' },
+          { id: 'clan_phoenician', name: 'Финикийские Торговцы', color: '#FF6347' },
+        ],
       },
     },
 
