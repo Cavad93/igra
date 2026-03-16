@@ -308,6 +308,21 @@ function getRoleLabel(role) {
 }
 
 // ──────────────────────────────────────────────────────────────
+// SENATOR OBITUARY — некролог известного сенатора
+// ──────────────────────────────────────────────────────────────
+
+// Вызывается ТОЛЬКО из SenateManager._runYearlyLifeCycle() и damage_senator()
+// при смерти материализованного сенатора от болезни или заговора.
+// Возвращает строку-некролог (plain text, не JSON).
+async function generateSenatorObituaryViaLLM(senator, factionName, senateState) {
+  const { system, user } = PROMPTS.senatorObituary(senator, factionName, senateState);
+  // Некролог — очень маленький ответ, 150 токенов достаточно
+  const raw = await callClaude(system, user, 150, CONFIG.MODEL_HAIKU);
+  // Убираем лишние пробелы/переносы строк
+  return raw.trim().replace(/\n+/g, ' ');
+}
+
+// ──────────────────────────────────────────────────────────────
 // LAZY MATERIALIZATION — оживление сенатора
 // ──────────────────────────────────────────────────────────────
 
