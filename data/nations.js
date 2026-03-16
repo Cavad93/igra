@@ -137,6 +137,21 @@ const INITIAL_GAME_STATE = {
 
       active_laws: [],
       characters: [],   // заполняется при генерации
+
+      // ── Конфигурация Сената (Lazy Materialization) ──
+      // 90 мест; сенаторы хранятся в SenateManager, не здесь.
+      // senate_config только описывает структуру фракций.
+      // Активируется при переходе к демократии/республике,
+      // но данные инициализируются сразу — нулевая цена.
+      senate_config: {
+        total_seats: 90,
+        factions: [
+          { id: 'aristocrats', name: 'Аристократы',    seats: 30, color: '#9C27B0' },
+          { id: 'demos',       name: 'Народная партия', seats: 25, color: '#4CAF50' },
+          { id: 'military',    name: 'Военная фракция', seats: 22, color: '#f44336' },
+          { id: 'merchants',   name: 'Торговцы',        seats: 13, color: '#FF9800' },
+        ],
+      },
     },
 
     // ─────────────────────────────────────────────

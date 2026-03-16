@@ -308,6 +308,26 @@ function getRoleLabel(role) {
 }
 
 // ──────────────────────────────────────────────────────────────
+// LAZY MATERIALIZATION — оживление сенатора
+// ──────────────────────────────────────────────────────────────
+
+// Вызывается ТОЛЬКО из SenateManager.materialize_senator().
+// Возвращает { name, traits, biography, portrait, influence }.
+async function materializeSenatorViaLLM(senator, context, reason) {
+  const { system, user } = PROMPTS.materializeSenator(senator, context, reason);
+  const raw = await callClaude(system, user, 250, CONFIG.MODEL_HAIKU);
+
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('materializeSenator: no JSON in response');
+
+  const data = JSON.parse(match[0]);
+  if (!data.name || !Array.isArray(data.traits)) throw new Error('materializeSenator: missing fields');
+
+  data.influence = Math.max(10, Math.min(100, Number(data.influence) || 50));
+  return data;
+}
+
+// ──────────────────────────────────────────────────────────────
 // ПРАВИТЕЛЬСТВО — 3 специализированных вызова
 // ──────────────────────────────────────────────────────────────
 

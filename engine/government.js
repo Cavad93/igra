@@ -11,6 +11,8 @@ function processAllGovernmentTicks() {
   for (const nationId of Object.keys(GAME_STATE.nations)) {
     processGovernmentTick(nationId);
   }
+  // Senate lazy materialization (async, fire-and-forget)
+  processSenateTickForAllNations();
 }
 
 function processGovernmentTick(nationId) {
@@ -854,4 +856,21 @@ function negotiateActor(charId, nationId, actionId, govType) {
 
 function _failResult(msg) {
   return { outcome:'fail', message:msg, loyalty_delta:0, disposition_delta:0, gold_spent:0, history_note:'' };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// SENATE — тик ленивой материализации (вызов из processAllGovernmentTicks)
+// ──────────────────────────────────────────────────────────────────────
+
+async function processSenateTickForAllNations() {
+  for (const nationId of Object.keys(GAME_STATE.nations)) {
+    const mgr = getSenateManager(nationId);
+    if (mgr) {
+      try {
+        await mgr.processTick(GAME_STATE.turn);
+      } catch (err) {
+        console.warn(`Senate tick error (${nationId}):`, err.message);
+      }
+    }
+  }
 }

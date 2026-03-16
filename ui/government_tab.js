@@ -61,6 +61,10 @@ function renderGovernmentTab(nation) {
     sections.push(gov.institutions.map(inst => renderInstitutionBlock(inst, nation)).join(''));
   }
 
+  // 5.5. Сенат (Lazy Materialization) — если инициализирован
+  const senateBlock = renderSenateLazyBlock(GAME_STATE.player_nation);
+  if (senateBlock) sections.push(senateBlock);
+
   // 6. Активные механики (только включённые)
   if (gov.elections?.enabled) {
     sections.push(renderElectionBlock(gov.elections));
@@ -1410,3 +1414,167 @@ function openGroupNegotiation(groupId, govType) {
 
 // Удаляем старые senate-специфичные алиасы
 function toggleSenateHall(instId) { toggleGovernmentHall(GAME_STATE.nations[GAME_STATE.player_nation]?.government?.type ?? 'republic'); }
+
+// ══════════════════════════════════════════════════════════════════════
+// SENATE — Lazy Materialization UI
+// ══════════════════════════════════════════════════════════════════════
+
+// Вставляется в renderGovernmentTab после институтов.
+function renderSenateLazyBlock(nationId) {
+  const mgr = getSenateManager(nationId);
+  if (!mgr) return '';
+
+  const stats       = mgr.getFactionStats();
+  const materialized = mgr.getMaterialized();
+  const total        = mgr.senators.length;
+  const matCount     = materialized.length;
+
+  // Фракционная полоска распределения мест
+  const factionBars = mgr.factions.map(f => {
+    const s = stats[f.id];
+    const pct = Math.round((s.seats / total) * 100);
+    return `<div class="senate-faction-bar" style="width:${pct}%;background:${f.color};title='${s.name}: ${s.seats} мест'"></div>`;
+  }).join('');
+
+  const factionLabels = mgr.factions.map(f => {
+    const s = stats[f.id];
+    const loyaltyColor = s.avg_loyalty > 60 ? '#4CAF50' : s.avg_loyalty > 35 ? '#FF9800' : '#f44336';
+    return `
+      <div class="senate-faction-label">
+        <span class="senate-faction-dot" style="background:${f.color}"></span>
+        <span class="senate-faction-name">${f.name}</span>
+        <span class="senate-faction-seats">${s.seats}</span>
+        <span class="senate-faction-loyalty" style="color:${loyaltyColor}">~${s.avg_loyalty}%</span>
+      </div>`;
+  }).join('');
+
+  // Карточки материализованных сенаторов
+  const matCards = materialized.map(s => {
+    const faction = mgr.factions.find(f => f.id === s.faction_id);
+    const loyColor = s.loyalty_score > 60 ? '#4CAF50' : s.loyalty_score > 35 ? '#FF9800' : '#f44336';
+    const tagHtml = (s.traits ?? []).map(t =>
+      `<span class="senate-tag">${t}</span>`
+    ).join('');
+    return `
+      <div class="senate-senator-card senate-senator-materialized"
+           onclick="openSenatorCard('${s.id}', '${nationId}')"
+           title="${s.biography ?? ''}">
+        <span class="senate-senator-portrait">${s.portrait ?? '👤'}</span>
+        <div class="senate-senator-info">
+          <div class="senate-senator-name">${s.name}</div>
+          <div class="senate-senator-tags">${tagHtml}</div>
+          <div class="senate-senator-faction" style="color:${faction?.color ?? '#aaa'}">${faction?.name ?? ''}</div>
+        </div>
+        <div class="senate-senator-loyalty" style="color:${loyColor}">${s.loyalty_score}%</div>
+      </div>`;
+  }).join('');
+
+  // Карточки призраков (по одной на фракцию — компактный вид)
+  const ghostSummary = mgr.factions.map(f => {
+    const ghosts = mgr.getGhostsByFaction(f.id);
+    if (!ghosts.length) return '';
+    // Показываем только одного самого честолюбивого
+    const topGhost = ghosts.sort((a, b) => b.ambition_level - a.ambition_level)[0];
+    return `
+      <div class="senate-senator-card senate-senator-ghost"
+           onclick="onSenatorGhostClick('${topGhost.id}', '${nationId}')"
+           title="Нажмите, чтобы узнать личность · Фракция: ${f.name}">
+        <span class="senate-senator-portrait">❓</span>
+        <div class="senate-senator-info">
+          <div class="senate-senator-name" style="color:#888">Неизвестен</div>
+          <div class="senate-senator-tags">
+            <span class="senate-tag senate-tag-dim">Честолюбие: ${'★'.repeat(topGhost.ambition_level)}</span>
+          </div>
+          <div class="senate-senator-faction" style="color:${f.color}">${f.name} · ещё ${ghosts.length}</div>
+        </div>
+        <div class="senate-senator-loyalty" style="color:#888">${topGhost.loyalty_score}%</div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="gov-section-title">🏛 Сенат (${total} мест)</div>
+    <div class="senate-block">
+
+      <div class="senate-mood-bar">
+        💬 <em>${mgr.global_senate_state}</em>
+      </div>
+
+      <div class="senate-seats-bar">${factionBars}</div>
+      <div class="senate-faction-legend">${factionLabels}</div>
+
+      <div class="senate-stats-row">
+        <span>Проявлено личностей: <b>${matCount}</b> из ${total}</span>
+        <span>Неизвестных: <b>${total - matCount}</b></span>
+      </div>
+
+      ${matCards ? `<div class="senate-senators-list">${matCards}</div>` : ''}
+      ${ghostSummary ? `<div class="senate-senators-list senate-ghosts">${ghostSummary}</div>` : ''}
+
+    </div>`;
+}
+
+// Клик по призраку — запускает материализацию
+async function onSenatorGhostClick(senatorId, nationId) {
+  const mgr = getSenateManager(nationId);
+  if (!mgr) return;
+
+  const card = event?.currentTarget ?? document.querySelector(`[onclick*="${senatorId}"]`);
+  if (card) {
+    card.innerHTML = `<span style="padding:8px;color:#aaa">⏳ Выясняем личность…</span>`;
+    card.onclick = null;
+  }
+
+  const senator = await mgr.materialize_senator(senatorId, 'player_click');
+
+  if (senator?.materialized) {
+    addEventLog(`🔍 Вы изучили сенатора: ${senator.name} (${senator.traits?.join(', ')}).`, 'character');
+  }
+
+  // Перерисовываем блок
+  renderGovernmentOverlay();
+}
+
+// Открыть карточку материализованного сенатора
+function openSenatorCard(senatorId, nationId) {
+  const mgr = getSenateManager(nationId);
+  if (!mgr) return;
+  const s = mgr.getSenatorById(senatorId);
+  if (!s || !s.materialized) return;
+
+  const faction = mgr.factions.find(f => f.id === s.faction_id);
+  const loyColor = s.loyalty_score > 60 ? '#4CAF50' : s.loyalty_score > 35 ? '#FF9800' : '#f44336';
+
+  // Используем существующую панель переговоров через pseudo-персонажа
+  const pseudo = {
+    id:          s.id,
+    name:        s.name,
+    portrait:    s.portrait ?? '👤',
+    age:         0,
+    court_role:  `Сенатор · ${faction?.name ?? ''}`,
+    disposition: s.loyalty_score,
+    ambition_goal: (s.traits ?? []).join(', '),
+    wants:       [],
+    fears:       [],
+    traits: {
+      loyalty:   s.loyalty_score,
+      ambition:  s.ambition_level * 20,
+      greed:     40,
+      caution:   50,
+      piety:     40,
+      cruelty:   10,
+    },
+    description: s.biography ?? '',
+    history:     [],
+  };
+
+  const nation = GAME_STATE.nations[nationId];
+  let overlay = document.getElementById('senator-negotiate-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'senator-negotiate-overlay';
+    overlay.onclick = e => { if (e.target === overlay) closeActorNegotiation(); };
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = renderActorNegotiationPanel(pseudo, nation);
+  overlay.style.display = 'flex';
+}
