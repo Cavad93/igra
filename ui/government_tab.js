@@ -798,15 +798,27 @@ function buildSenateContent(gov, nation) {
   }
 
   // Привязываем реальных персонажей к фракциям
+  const unassigned = [];
   for (const s of senators) {
     const key = s.faction_name ?? '';
-    if (byFaction[key] !== undefined) {
-      byFaction[key].senators.push(s);
-    } else {
-      // Персонаж без фракции → в первую фракцию (лидер/представитель)
-      const firstKey = Object.keys(byFaction)[0];
-      byFaction[firstKey].senators.push(s);
+    if (byFaction[key] !== undefined) byFaction[key].senators.push(s);
+    else unassigned.push(s);
+  }
+
+  // Нераспределённых раздаём: сначала по одному на каждую пустую фракцию,
+  // потом остатки — в первую фракцию
+  if (unassigned.length) {
+    const keys = Object.keys(byFaction);
+    let ui = 0;
+    // Первый проход: каждой фракции без персонажей — по одному лидеру
+    for (const key of keys) {
+      if (ui >= unassigned.length) break;
+      if (byFaction[key].senators.length === 0)
+        byFaction[key].senators.push(unassigned[ui++]);
     }
+    // Остальные → в первую фракцию
+    for (; ui < unassigned.length; ui++)
+      byFaction[keys[0]].senators.push(unassigned[ui]);
   }
 
   const groups  = Object.values(byFaction);
