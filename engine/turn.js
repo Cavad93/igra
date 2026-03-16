@@ -329,6 +329,7 @@ function loadGame() {
       Object.assign(GAME_STATE, loadedState);
       _migrateCharacterIds();
       _sanitizeInstitutions();
+      _migrateSenateConfig();
       addEventLog('Игра загружена из сохранения.', 'info');
       return true;
     }
@@ -373,6 +374,19 @@ function _sanitizeInstitutions() {
     const insts = nation.government?.institutions;
     if (Array.isArray(insts)) {
       nation.government.institutions = insts.filter(i => i?.id && i?.name);
+    }
+  }
+}
+
+// Восстанавливает senate_config из INITIAL_GAME_STATE для наций, где он отсутствует
+// (старые сохранения были сделаны до добавления этого поля)
+function _migrateSenateConfig() {
+  for (const [nationId, nation] of Object.entries(GAME_STATE.nations)) {
+    if (!nation.senate_config) {
+      const initial = INITIAL_GAME_STATE.nations?.[nationId];
+      if (initial?.senate_config) {
+        nation.senate_config = JSON.parse(JSON.stringify(initial.senate_config));
+      }
     }
   }
 }
