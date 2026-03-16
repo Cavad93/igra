@@ -1691,56 +1691,85 @@ function senateReveal(senatorId, nationId) {
 
 // ── «Предложить закон в Сенат» — выбор типа ─────────────────────────
 function openSenateLawProposal(nationId) {
-  const LAW_TYPES = [
-    { type: 'trade',     name: 'Торговый указ' },
-    { type: 'war',       name: 'Военные ассигнования' },
-    { type: 'build',     name: 'Строительная программа' },
-    { type: 'taxes',     name: 'Налоговая реформа' },
-    { type: 'religion',  name: 'Религиозный декрет' },
-    { type: 'diplomacy', name: 'Дипломатический договор' },
-    { type: 'reform',    name: 'Административная реформа' },
-  ];
-
   let overlay = document.getElementById('senate-law-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
     overlay.id = 'senate-law-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:2000;';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);display:flex;align-items:center;justify-content:center;z-index:2000;';
     overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
     document.body.appendChild(overlay);
   }
 
   overlay.innerHTML = `
-    <div style="background:#1a1a2e;border:1px solid rgba(255,255,255,0.2);border-radius:8px;padding:20px;max-width:360px;width:90%;">
-      <div style="font-size:14px;font-weight:bold;margin-bottom:12px;color:#eee;">📋 Вынести закон на голосование Сената</div>
-      ${LAW_TYPES.map(lt => `
-        <button onclick="submitSenateLaw('${nationId}','${lt.type}','${lt.name}')"
-                style="display:block;width:100%;margin-bottom:6px;padding:8px;
-                       background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);
-                       border-radius:4px;color:#ccc;cursor:pointer;text-align:left;font-size:12px;">
-          ${lt.name}
+    <div class="senate-law-form">
+      <div class="slf-title">🏛️ Вынести закон на голосование Сената</div>
+      <div class="slf-subtitle">Консул, составьте текст закона и подготовьте речь перед отцами-сенаторами</div>
+
+      <label class="slf-label">Название закона</label>
+      <input id="slf-law-name" class="slf-input" type="text" maxlength="80"
+             placeholder="Напр.: «О расширении портовых сборов»" />
+
+      <label class="slf-label">Текст и суть закона</label>
+      <textarea id="slf-law-text" class="slf-textarea" rows="3"
+                placeholder="Опишите, что именно предлагается. Сенат будет читать это."></textarea>
+
+      <label class="slf-label">Категория <span style="color:#888;font-size:10px;">(влияет на фракционное голосование)</span></label>
+      <select id="slf-law-type" class="slf-select">
+        <option value="trade">🪙 Торговля и рынки</option>
+        <option value="war">⚔️ Военные ассигнования</option>
+        <option value="build">🏗️ Строительство и инфраструктура</option>
+        <option value="taxes">📊 Налоги и финансы</option>
+        <option value="religion">🔱 Религия и обряды</option>
+        <option value="diplomacy">🤝 Дипломатия</option>
+        <option value="reform">⚖️ Административная реформа</option>
+      </select>
+
+      <label class="slf-label">Ваша речь перед Сенатом <span style="color:#888;font-size:10px;">(необязательно, но влияет на итог)</span></label>
+      <textarea id="slf-law-speech" class="slf-textarea" rows="4"
+                placeholder="Отцы-сенаторы! Обращаюсь к вам с этим законом потому...&#10;Упомяните торговлю, войну, народ, традиции — сенаторы заметят."></textarea>
+
+      <div class="slf-btns">
+        <button onclick="document.getElementById('senate-law-overlay').style.display='none'"
+                class="slf-btn-cancel">Отмена</button>
+        <button onclick="submitSenateLaw('${nationId}')" class="slf-btn-submit">
+          ⚖️ Войти в зал Сената
         </button>
-      `).join('')}
-      <button onclick="document.getElementById('senate-law-overlay').style.display='none'"
-              style="margin-top:4px;padding:5px 12px;background:rgba(255,255,255,0.08);
-                     border:1px solid #555;border-radius:4px;color:#888;cursor:pointer;font-size:11px;">
-        Отмена
-      </button>
+      </div>
     </div>
   `;
   overlay.style.display = 'flex';
 }
 
-function submitSenateLaw(nationId, lawType, lawName) {
+function submitSenateLaw(nationId) {
+  const nameEl   = document.getElementById('slf-law-name');
+  const textEl   = document.getElementById('slf-law-text');
+  const typeEl   = document.getElementById('slf-law-type');
+  const speechEl = document.getElementById('slf-law-speech');
+
+  const lawName   = (nameEl?.value  ?? '').trim();
+  const lawText   = (textEl?.value  ?? '').trim();
+  const lawType   = typeEl?.value   ?? 'reform';
+  const speech    = (speechEl?.value ?? '').trim();
+
+  if (!lawName) {
+    nameEl?.focus();
+    nameEl?.classList.add('slf-input-error');
+    setTimeout(() => nameEl?.classList.remove('slf-input-error'), 1200);
+    return;
+  }
+
   document.getElementById('senate-law-overlay').style.display = 'none';
-  showVotingModal(nationId, {
+
+  const law = {
     id:               `LAW_${String(Date.now()).slice(-6)}`,
     name:             lawName,
-    text:             `Консул выносит на голосование Сената: «${lawName}».`,
+    text:             lawText || `Консул выносит на голосование: «${lawName}».`,
     type:             lawType,
     proposed_turn:    GAME_STATE.turn,
     effects_per_turn: {},
     requires_vote:    true,
     vote:             null,
-  });
+  };
+
+  startSenateDebate(nationId, law, speech);
 }

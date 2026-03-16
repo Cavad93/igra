@@ -452,6 +452,12 @@ class SenateManager {
     const mods       = { ...(proposal.faction_modifiers ?? {}) };
     const lawType    = proposal.law_type ?? null;
 
+    // Бонус от речи игрока: { faction_id: delta_pp }
+    const speechBonus = proposal.speech_bonus ?? {};
+    for (const [fId, bonus] of Object.entries(speechBonus)) {
+      mods[fId] = (mods[fId] ?? 0) + bonus;
+    }
+
     // Система голосования из StateArchitecture
     const arch         = GAME_STATE?.nations[this.nationId]?.senate_config?.state_architecture;
     const votingSystem = arch?.voting_system ?? 'Meritocracy';

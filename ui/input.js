@@ -474,6 +474,375 @@ function finalizeVote(nationId, law, votesFor, votesAgainst, votesAbstain, passe
   renderAll();
 }
 
+// ══════════════════════════════════════════════════════════════
+// ДЕБАТЫ В СЕНАТЕ — анимированное голосование с речами
+// ══════════════════════════════════════════════════════════════
+
+// Фракционные реплики: [faction_id][for|against]
+const _FACTION_SPEECHES = {
+  aristocrats: {
+    for: [
+      'Этот закон укрепит устои, что держат Сиракузы тысячелетиями.',
+      'Благородные дома города поддерживают это мудрое решение.',
+      'Традиция и порядок — вот что стоит за моим голосом «за».',
+      'Патриции Сиракуз одобряют. Пусть закон будет принят.',
+    ],
+    against: [
+      'Это посягательство на права нашего сословия. Я против!',
+      'Подобный закон разрушит устои, выкованные предками.',
+      'Нет. Это противно природе порядка и древним привилегиям.',
+      'Благородные дома не допустят такого решения.',
+    ],
+  },
+  demos: {
+    for: [
+      'Народ Сиракуз давно ждёт этого. Голосую «за»!',
+      'Наконец-то слово сказано в пользу простых граждан.',
+      'Плебс поддержит такой закон. И я — вместе с ним.',
+      'Этот закон — голос улицы, агоры, гавани. Поддерживаю.',
+    ],
+    against: [
+      'Где здесь забота о народе? Я голосую «против».',
+      'Богатые снова тянут одеяло на себя. Это несправедливо!',
+      'Граждане будут недовольны. Я выражаю их волю — против.',
+      'Этот закон не для народа. Нет.',
+    ],
+  },
+  military: {
+    for: [
+      'Армия нуждается в твёрдом решении. Поддерживаю.',
+      'Ветераны Сиракуз ждут действий. Голосую «за».',
+      'Во имя славы города и его легионов — поддерживаю.',
+      'Сила — единственный язык, который уважают враги. За!',
+    ],
+    against: [
+      'Армия видит в этом слабость. Я голосую «против».',
+      'Пока враги точат мечи, мы тратим время на это? Против!',
+      'Военные нужды города важнее. Не поддерживаю.',
+      'Это решение подорвёт боеспособность. Категорически против.',
+    ],
+  },
+  merchants: {
+    for: [
+      'Торговый квартал одобряет. Это выгодно для гавани.',
+      'Рынки оживятся. Моё слово — «за».',
+      'Купцы Сиракуз поддержат любой закон, открывающий возможности.',
+      'Выгода говорит «за». И я — вместе с ней.',
+    ],
+    against: [
+      'Это ударит по торговле. Рынки пострадают. Против.',
+      'Купцы потеряют. Я голосую «против» от имени гавани.',
+      'Нет смысла в законе, который закрывает, а не открывает.',
+      'Прибыль — это кровь города. Этот закон её остановит.',
+    ],
+  },
+};
+
+// Базовые реплики для неизвестных фракций
+const _GENERIC_SPEECHES = {
+  for:     ['Поддерживаю это решение.', 'Голосую «за».', 'Считаю это верным шагом.'],
+  against: ['Возражаю.', 'Голосую «против».', 'Это ошибочный путь.'],
+};
+
+function _pickSpeech(factionId, side) {
+  const pool = (_FACTION_SPEECHES[factionId] ?? _GENERIC_SPEECHES)[side] ?? _GENERIC_SPEECHES[side];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// Анализирует речь игрока и возвращает {speech_bonus, resonance[]}
+function _calcArgumentBonus(speech, factions) {
+  if (!speech || !speech.trim()) return { speech_bonus: {}, resonance: [] };
+
+  const lower = speech.toLowerCase();
+  const bonus  = {};
+  const resonance = [];
+
+  const KEYWORDS = {
+    aristocrats: ['аристократ', 'благородн', 'патриций', 'традиц', 'клан', 'знать', 'порядок', 'устои'],
+    demos:       ['народ', 'плебс', 'гражданин', 'улиц', 'бедн', 'справедлив', 'свобод', 'права'],
+    military:    ['армия', 'войск', 'легион', 'война', 'враг', 'победа', 'ветеран', 'оружие', 'защит'],
+    merchants:   ['торгов', 'купец', 'рынок', 'гавань', 'порт', 'прибыль', 'товар', 'флот', 'деньг'],
+  };
+
+  for (const faction of factions ?? []) {
+    const keys = KEYWORDS[faction.id] ?? [];
+    const hits  = keys.filter(k => lower.includes(k)).length;
+    if (hits > 0) {
+      const bp = Math.min(hits * 4, 14); // до +14pp за фракцию
+      bonus[faction.id] = bp;
+      resonance.push({ id: faction.id, name: faction.name, bonus: bp });
+    }
+  }
+
+  return { speech_bonus: bonus, resonance };
+}
+
+// Задержка-промис
+function _wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Добавляет фазовый заголовок в stage
+function _debateAddPhase(stage, text) {
+  const el = document.createElement('div');
+  el.className = 'debate-phase-label';
+  el.textContent = text;
+  stage.appendChild(el);
+}
+
+// Добавляет заметку (резонанс речи) в stage
+function _debateAddNote(stage, text) {
+  const el = document.createElement('div');
+  el.className = 'debate-resonance-note';
+  el.textContent = text;
+  stage.appendChild(el);
+  stage.scrollTop = stage.scrollHeight;
+}
+
+// Добавляет реплику сенатора / игрока
+function _debateAddSpeech(stage, { portrait, name, factionLabel, text, side }) {
+  const el = document.createElement('div');
+  el.className = `debate-speech-entry debate-speech-${side}`;
+  el.innerHTML = `
+    <span class="debate-portrait">${portrait}</span>
+    <div class="debate-speech-body">
+      <div class="debate-speech-name">${name}${factionLabel ? ` <span class="debate-speech-faction">${factionLabel}</span>` : ''}</div>
+      <div class="debate-speech-text">${text}</div>
+    </div>
+    ${side === 'for' ? '<span class="debate-vote-badge dv-for">ЗА</span>'
+    : side === 'against' ? '<span class="debate-vote-badge dv-against">ПРОТИВ</span>'
+    : ''}
+  `;
+  stage.appendChild(el);
+  stage.scrollTop = stage.scrollHeight;
+}
+
+// Анимирует счётчики голосов
+async function _animateVoteCount(targetFor, targetAgainst, targetAbstain, durationMs) {
+  const steps = 40;
+  const interval = durationMs / steps;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    const elF = document.getElementById('dvc-for');
+    const elA = document.getElementById('dvc-against');
+    const elN = document.getElementById('dvc-abstain');
+    if (elF) elF.textContent = Math.round(targetFor     * ease);
+    if (elA) elA.textContent = Math.round(targetAgainst * ease);
+    if (elN) elN.textContent = Math.round(targetAbstain * ease);
+    await _wait(interval);
+  }
+}
+
+// Определяет метку фракции для сенатора
+function _factionLabel(factionId) {
+  const labels = {
+    aristocrats: 'Аристократы', demos: 'Народная партия',
+    military: 'Военная фракция', merchants: 'Торговцы',
+  };
+  return labels[factionId] ?? factionId;
+}
+
+// Главная точка входа — вызывается из submitSenateLaw
+async function startSenateDebate(nationId, law, playerSpeech) {
+  const nation = GAME_STATE.nations[nationId];
+  const mgr    = getSenateManager(nationId);
+
+  if (!mgr || !nation?.senate_config) {
+    // Нет Сената — старый модал
+    showVotingModal(nationId, law);
+    return;
+  }
+
+  // Анализ речи игрока → бонус фракциям
+  const { speech_bonus, resonance } = _calcArgumentBonus(
+    playerSpeech,
+    nation.senate_config.factions ?? []
+  );
+
+  // Запускаем голосование с учётом речи
+  const result = mgr.process_vote({
+    threshold:   law.threshold ?? 51,
+    law_type:    law.type ?? 'reform',
+    law_tags:    law.tags ?? [],
+    speech_bonus,
+  });
+  mgr._recalculateSenateState();
+
+  // Материализованные сенаторы для дебатов (до 6)
+  const speakers = mgr.getMaterialized().slice(0, 6);
+
+  // Показываем дебатный зал
+  _showSenateDebateUI(nationId, law, playerSpeech, result, speakers, resonance);
+}
+
+function _showSenateDebateUI(nationId, law, playerSpeech, result, speakers, resonance) {
+  let overlay = document.getElementById('senate-debate-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'senate-debate-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.93);display:flex;align-items:center;justify-content:center;z-index:3000;';
+    document.body.appendChild(overlay);
+  }
+
+  overlay.innerHTML = `
+    <div class="senate-debate-chamber">
+      <div class="debate-chamber-title">🏛️ Зал Сената — Голосование</div>
+      <div class="debate-law-header">
+        <div class="debate-law-name">"${law.name}"</div>
+        ${law.text ? `<div class="debate-law-text">${law.text}</div>` : ''}
+      </div>
+      <div id="debate-stage" class="debate-stage"></div>
+    </div>
+  `;
+  overlay.style.display = 'flex';
+
+  // Запускаем анимацию асинхронно
+  _runDebateAnimation(nationId, law, playerSpeech, result, speakers, resonance);
+}
+
+async function _runDebateAnimation(nationId, law, playerSpeech, result, speakers, resonance) {
+  const stage = document.getElementById('debate-stage');
+  if (!stage) return;
+
+  // — Фаза 0: Объявление —
+  _debateAddPhase(stage, '⚖️ Консул берёт слово...');
+  await _wait(700);
+
+  // — Фаза 1: Речь игрока —
+  if (playerSpeech && playerSpeech.trim()) {
+    _debateAddSpeech(stage, {
+      portrait:     '👑',
+      name:         'Консул (вы)',
+      factionLabel: '',
+      text:         playerSpeech,
+      side:         'player',
+    });
+    await _wait(1000);
+
+    // Реакция на ключевые слова в речи
+    for (const r of resonance) {
+      await _wait(350);
+      _debateAddNote(stage, `💬 Фракция «${r.name}» услышала ваши слова (+${r.bonus}% поддержки)`);
+    }
+    if (resonance.length) await _wait(700);
+  } else {
+    _debateAddSpeech(stage, {
+      portrait:     '👑',
+      name:         'Консул',
+      factionLabel: '',
+      text:         `Выношу на голосование: «${law.name}». Прошу сенаторов высказаться.`,
+      side:         'player',
+    });
+    await _wait(700);
+  }
+
+  // — Фаза 2: Речи сенаторов —
+  if (speakers.length > 0) {
+    _debateAddPhase(stage, '🗣️ Сенаторы высказываются...');
+    await _wait(500);
+
+    for (const senator of speakers) {
+      const vote    = senator.loyalty_score > 52 ? 'for' : 'against';
+      const speech  = _pickSpeech(senator.faction_id, vote);
+      _debateAddSpeech(stage, {
+        portrait:     senator.portrait ?? '👤',
+        name:         senator.name,
+        factionLabel: _factionLabel(senator.faction_id),
+        text:         speech,
+        side:         vote,
+      });
+      await _wait(650 + Math.random() * 300);
+    }
+    await _wait(500);
+  } else {
+    _debateAddPhase(stage, '🌑 Анонимные сенаторы молча занимают места...');
+    await _wait(800);
+  }
+
+  // — Фаза 3: Голосование —
+  _debateAddPhase(stage, '🗳️ Голоса подсчитываются...');
+  await _wait(400);
+
+  const vcDiv = document.createElement('div');
+  vcDiv.className = 'debate-vote-counters';
+  vcDiv.innerHTML = `
+    <div class="dvc-item dvc-item-for">✅ За<br><b id="dvc-for">0</b></div>
+    <div class="dvc-item dvc-item-against">❌ Против<br><b id="dvc-against">0</b></div>
+    <div class="dvc-item dvc-item-abstain">⬜ Возд.<br><b id="dvc-abstain">0</b></div>
+  `;
+  stage.appendChild(vcDiv);
+  stage.scrollTop = stage.scrollHeight;
+
+  await _animateVoteCount(
+    Math.round(result.for),
+    Math.round(result.against),
+    Math.round(result.abstain),
+    2200
+  );
+  await _wait(600);
+
+  // Коалиции
+  if (result.coalitions?.length) {
+    for (const [f1, f2, dir] of result.coalitions) {
+      _debateAddNote(stage,
+        `🤝 Коалиция: «${_factionLabel(f1)}» и «${_factionLabel(f2)}» голосуют вместе (${dir > 0 ? 'за' : 'против'})`
+      );
+      await _wait(300);
+    }
+    await _wait(400);
+  }
+
+  // — Фаза 4: Вердикт —
+  const passed = result.passed && !result.vetoed;
+
+  const verdictEl = document.createElement('div');
+  verdictEl.className = `debate-verdict ${passed ? 'debate-verdict-pass' : 'debate-verdict-fail'}`;
+  verdictEl.innerHTML = passed
+    ? '✅ ЗАКОН ПРИНЯТ'
+    : (result.vetoed
+        ? `⚖️ ЗАКОН ЗАБЛОКИРОВАН ВЕТО<br><span style="font-size:13px;font-weight:normal;">Трибун ${result.tribune_name ?? ''} поднял жезл</span>`
+        : '❌ ЗАКОН ОТКЛОНЁН');
+  stage.appendChild(verdictEl);
+  stage.scrollTop = stage.scrollHeight;
+
+  await _wait(600);
+
+  // Кнопка подтверждения
+  const btnEl = document.createElement('div');
+  btnEl.style.textAlign = 'center';
+  btnEl.style.marginTop = '16px';
+  const lawJson = encodeURIComponent(JSON.stringify(law));
+  btnEl.innerHTML = `
+    <button class="debate-accept-btn"
+            onclick="finalizeDebateVote('${nationId}', '${lawJson}', ${Math.round(result.for)}, ${Math.round(result.against)}, ${Math.round(result.abstain)}, ${result.passed})">
+      Покинуть зал Сената
+    </button>
+  `;
+  stage.appendChild(btnEl);
+  stage.scrollTop = stage.scrollHeight;
+}
+
+function finalizeDebateVote(nationId, lawJson, votesFor, votesAgainst, votesAbstain, passed) {
+  const overlay = document.getElementById('senate-debate-overlay');
+  if (overlay) overlay.style.display = 'none';
+
+  let law;
+  try { law = JSON.parse(decodeURIComponent(lawJson)); } catch { law = {}; }
+
+  if (passed) {
+    law.vote = { for: votesFor, against: votesAgainst, abstain: votesAbstain };
+    law.enacted_turn = GAME_STATE.turn;
+    GAME_STATE.nations[nationId].active_laws ??= [];
+    GAME_STATE.nations[nationId].active_laws.push(law);
+    addEventLog(`Закон "${law.name}" принят Сенатом! За: ${votesFor}, Против: ${votesAgainst}.`, 'law');
+  } else {
+    addEventLog(`Закон "${law.name}" отклонён Сенатом. За: ${votesFor}, Против: ${votesAgainst}.`, 'law');
+  }
+
+  renderAll();
+}
+
 // ──────────────────────────────────────────────────────────────
 // UI УТИЛИТЫ
 // ──────────────────────────────────────────────────────────────
