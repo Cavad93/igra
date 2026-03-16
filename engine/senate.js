@@ -47,6 +47,8 @@ const VOTE_MODIFIERS = {
   'Foreign_Agent:Rome':      { war: +30, trade: -20, reform: -10 },
   'Foreign_Agent:Egypt':     { trade: +30 },
   'Blackmailed':             { war: +40, taxes: +40, reform: +40, religion: +40, build: +40, trade: +40 },
+  // Конституционные теги
+  'New_Man':                 { reform: +30, build: +20, war: +15 },  // лоялен Консулу — поддержит реформы
 };
 
 // Пул скрытых интересов для случайной выдачи
@@ -228,6 +230,10 @@ class SenateManager {
     const mods       = proposal.faction_modifiers ?? {};
     const lawType    = proposal.law_type ?? null;
 
+    // Система голосования из StateArchitecture (Plutocracy / Meritocracy / Democracy)
+    const arch         = GAME_STATE?.nations[this.nationId]?.senate_config?.state_architecture;
+    const votingSystem = arch?.voting_system ?? 'Meritocracy';
+
     let totalFor = 0, totalAgainst = 0, totalAbstain = 0;
 
     for (const senator of this.senators) {
@@ -251,10 +257,25 @@ class SenateManager {
         support  = Math.max(0, Math.min(1, support));
       }
 
+      // Вес голоса по системе голосования:
+      //   Plutocracy  — богатые х3, остальные х1
+      //   Meritocracy — честолюбивые получают х1.0…х1.5
+      //   Democracy   — все равны (х1)
+      let weight = 1;
+      if (votingSystem === 'Plutocracy') {
+        const isWealthy = (senator.traits ?? []).some(t =>
+          ['Патриций', 'Wealthy', 'Торговец'].includes(t)
+        ) || (senator.wealth ?? 0) > 7000;
+        weight = isWealthy ? 3 : 1;
+      } else if (votingSystem === 'Meritocracy') {
+        weight = 1 + Math.round(senator.ambition_level / 5 * 5) / 10; // 1.0–2.0
+      }
+      // Democracy: weight stays 1
+
       const roll = Math.random();
-      if      (roll < support)            totalFor++;
-      else if (roll < support + 0.8)      totalAgainst++;
-      else                                totalAbstain++;
+      if      (roll < support)       totalFor     += weight;
+      else if (roll < support + 0.8) totalAgainst += weight;
+      else                           totalAbstain += weight;
     }
 
     const total     = totalFor + totalAgainst + totalAbstain;
@@ -408,6 +429,17 @@ class SenateManager {
       if (!senator.revealed_interests) senator.revealed_interests = [];
       if (!senator.revealed_interests.includes('Blackmailed')) {
         senator.revealed_interests.push('Blackmailed');
+      }
+
+      // Честь игрока в глазах клана сенатора падает навсегда
+      if (senator.clan_id && this.clans[senator.clan_id]) {
+        const clan = this.clans[senator.clan_id];
+        clan.honor_opinion = Math.max(0, (clan.honor_opinion ?? 100) - 15);
+      }
+      // Глобальная честь Консула
+      const constitState = GAME_STATE?.nations[this.nationId]?.constitutional_state;
+      if (constitState) {
+        constitState.player_honor = Math.max(0, (constitState.player_honor ?? 100) - 5);
       }
 
       return {

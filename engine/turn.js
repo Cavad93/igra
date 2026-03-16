@@ -35,6 +35,9 @@ async function processTurn() {
     // 1.5. Правительство (детерминировано)
     processAllGovernmentTicks();
 
+    // 1.6. Конституционный движок — тирания, заговоры, гражданская война
+    CONSTITUTIONAL_ENGINE.tick(GAME_STATE.player_nation);
+
     // 2. Население (детерминировано)
     updatePopulationGrowth();
     updateHappiness();

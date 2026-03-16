@@ -323,6 +323,22 @@ async function generateSenatorObituaryViaLLM(senator, factionName, senateState) 
 }
 
 // ──────────────────────────────────────────────────────────────
+// КОНСТИТУЦИОННЫЙ ХРОНИКЁР — реакция Форума на реформу
+// ──────────────────────────────────────────────────────────────
+// Вызывается из ConstitutionalEngine._triggerChronicle() (async, не блокирует).
+// Добавляет нарратив в eventLog как 'law' запись.
+async function generateConstitutionalChronicleViaLLM(ctx) {
+  try {
+    const { system, user } = PROMPTS.constitutionalChronicle(ctx);
+    const raw = await callClaude(system, user, 250, CONFIG.MODEL_HAIKU);
+    const text = raw.trim().replace(/\n+/g, ' ');
+    if (text) addEventLog(`📜 Форум: ${text}`, 'law');
+  } catch (err) {
+    console.warn('constitutionalChronicle LLM error:', err.message);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
 // LAZY MATERIALIZATION — оживление сенатора
 // ──────────────────────────────────────────────────────────────
 

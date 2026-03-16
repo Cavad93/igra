@@ -160,6 +160,16 @@ const INITIAL_GAME_STATE = {
           { id: 'clan_old_blood',  name: 'Старая Кровь',         color: '#B8860B' },
           { id: 'clan_phoenician', name: 'Финикийские Торговцы', color: '#FF6347' },
         ],
+        // ── Конституционные мета-правила (StateArchitecture) ──────────
+        // Изменяются только через ConstitutionalEngine.process_constitutional_law()
+        state_architecture: {
+          senate_capacity: 90,           // 90–600 мест
+          election_cycle:  4,            // лет между выборами
+          consul_term:     2,            // лет срока Консула
+          consul_powers:   'Standard',   // 'Limited' | 'Standard' | 'Dictatorial'
+          voting_system:   'Meritocracy',// 'Plutocracy' | 'Meritocracy' | 'Democracy'
+          veto_rights:     false,        // Народный Трибун с правом блокировки
+        },
       },
     },
 
