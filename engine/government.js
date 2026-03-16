@@ -508,3 +508,192 @@ function getPowerResourceIcon(type) {
   };
   return icons[type] ?? '🔮';
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// ПЕРЕГОВОРЫ С СЕНАТОРОМ
+// ══════════════════════════════════════════════════════════════════════
+
+// Результат: { outcome: 'success'|'partial'|'fail', message, loyalty_delta, disposition_delta, gold_spent, history_note }
+function negotiateSenator(charId, nationId, actionId) {
+  const nation = GAME_STATE.nations[nationId];
+  if (!nation) return null;
+
+  const senator = (nation.characters ?? []).find(c => c.id === charId);
+  if (!senator) return null;
+
+  const disp    = senator.disposition ?? 50;
+  const greed   = senator.traits?.greed   ?? 50;
+  const caution = senator.traits?.caution ?? 50;
+  const loyalty = senator.traits?.loyalty ?? 50;
+  const ambition= senator.traits?.ambition ?? 50;
+  const power   = nation.government?.power_resource?.current ?? 50;
+  const treasury= nation.economy?.treasury ?? 0;
+
+  const roll = Math.random() * 100;
+
+  if (actionId === 'deal') {
+    // Предложить союз — обещание поддержки желания
+    const threshold = Math.max(10, 20 + disp * 0.6 - caution * 0.15);
+    if (roll < threshold) {
+      const gain = Math.round(8 + disp * 0.1);
+      return {
+        outcome: 'success',
+        message: `${senator.name} принимает ваше предложение. «Мы найдём общий язык, если вы сдержите слово».`,
+        loyalty_delta: gain,
+        disposition_delta: Math.round(gain * 0.8),
+        gold_spent: 0,
+        history_note: `Заключил союз с правителем. Расположение растёт.`,
+      };
+    } else if (roll < threshold + 25) {
+      return {
+        outcome: 'partial',
+        message: `${senator.name} выслушал, но не спешит. «Слова — не достаточно. Нужны дела».`,
+        loyalty_delta: 2,
+        disposition_delta: 3,
+        gold_spent: 0,
+        history_note: `Выслушал предложение правителя. Занял выжидательную позицию.`,
+      };
+    } else {
+      return {
+        outcome: 'fail',
+        message: `${senator.name} отвергает союз. «Мои обязательства — перед Сенатом, а не перед вами».`,
+        loyalty_delta: 0,
+        disposition_delta: -3,
+        gold_spent: 0,
+        history_note: `Отверг предложение правителя о союзе.`,
+      };
+    }
+  }
+
+  if (actionId === 'bribe') {
+    const bribeCost = Math.round(500 + greed * 80);
+    if (treasury < bribeCost) {
+      return {
+        outcome: 'fail',
+        message: `Недостаточно золота для подкупа (нужно ${bribeCost}).`,
+        loyalty_delta: 0,
+        disposition_delta: 0,
+        gold_spent: 0,
+        history_note: '',
+      };
+    }
+    const threshold = Math.min(90, 30 + disp * 0.4 + greed * 0.3);
+    if (roll < threshold) {
+      const loyGain = Math.round(10 + greed * 0.15);
+      return {
+        outcome: 'success',
+        message: `${senator.name} незаметно принимает мешок золота. «Что ж... возможно, я был слишком суров к вам».`,
+        loyalty_delta: loyGain,
+        disposition_delta: Math.round(loyGain * 0.9),
+        gold_spent: bribeCost,
+        history_note: `Получил подношение от правителя. Лояльность выросла.`,
+      };
+    } else if (greed < 30) {
+      // Принципиальный — оскорблён
+      return {
+        outcome: 'fail',
+        message: `${senator.name} с презрением отталкивает золото. «Вы смеете думать, что я продаюсь?!» Расположение падает.`,
+        loyalty_delta: -5,
+        disposition_delta: -12,
+        gold_spent: 0,
+        history_note: `Оскорблён попыткой подкупа. Стал враждебнее.`,
+      };
+    } else {
+      return {
+        outcome: 'fail',
+        message: `${senator.name} берёт золото, но ничего не обещает. «Это уплата старого долга, не более».`,
+        loyalty_delta: 2,
+        disposition_delta: 1,
+        gold_spent: bribeCost,
+        history_note: `Взял золото, но остался при своих взглядах.`,
+      };
+    }
+  }
+
+  if (actionId === 'appeal') {
+    // Апелляция к личным интересам — называем его желание
+    const threshold = Math.min(80, 25 + disp * 0.5 + ambition * 0.1);
+    if (roll < threshold) {
+      const want = (senator.wants?.[0] ?? 'ваши цели').replace(/_/g, ' ');
+      return {
+        outcome: 'success',
+        message: `Вы апеллируете к его стремлению: "${want}". ${senator.name} задумывается. «Возможно, у нас больше общего, чем я думал».`,
+        loyalty_delta: 5,
+        disposition_delta: 8,
+        gold_spent: 0,
+        history_note: `Правитель обратился к его интересам. Проникся уважением.`,
+      };
+    } else if (roll < threshold + 30) {
+      return {
+        outcome: 'partial',
+        message: `${senator.name} слушает, но остаётся скептичен. «Слова красивые, посмотрим на дела».`,
+        loyalty_delta: 1,
+        disposition_delta: 2,
+        gold_spent: 0,
+        history_note: `Выслушал апелляцию к интересам. Остался при своём.`,
+      };
+    } else {
+      return {
+        outcome: 'fail',
+        message: `${senator.name} не впечатлён. «Не надо учить меня, в чём мои интересы».`,
+        loyalty_delta: -1,
+        disposition_delta: -2,
+        gold_spent: 0,
+        history_note: `Отверг апелляцию правителя. Почувствовал манипуляцию.`,
+      };
+    }
+  }
+
+  if (actionId === 'pressure') {
+    if (power < 20) {
+      return {
+        outcome: 'fail',
+        message: `Ваша власть слишком слаба для давления (нужно ≥ 20).`,
+        loyalty_delta: 0,
+        disposition_delta: 0,
+        gold_spent: 0,
+        history_note: '',
+      };
+    }
+    const threshold = Math.min(70, 10 + power * 0.5 - caution * 0.2);
+    if (roll < threshold * 0.5) {
+      // Полный успех давления
+      return {
+        outcome: 'success',
+        message: `Вы демонстрируете силу. ${senator.name} бледнеет. «…Я понял вас. Буду лоялен».`,
+        loyalty_delta: 12,
+        disposition_delta: -5,  // уважает силу, но не любит
+        gold_spent: 0,
+        history_note: `Поддался давлению правителя. Лоялен из страха.`,
+      };
+    } else if (roll < threshold) {
+      return {
+        outcome: 'partial',
+        message: `${senator.name} внешне соглашается, но в глазах — упрямство. «Как вам угодно… на этот раз».`,
+        loyalty_delta: 4,
+        disposition_delta: -8,
+        gold_spent: 0,
+        history_note: `Уступил давлению, затаил обиду.`,
+      };
+    } else {
+      // Провал давления — скандал
+      return {
+        outcome: 'fail',
+        message: `${senator.name} открыто сопротивляется. «Угрозы — оружие тирана! Сенат это запомнит!» Расположение резко падает.`,
+        loyalty_delta: -8,
+        disposition_delta: -15,
+        gold_spent: 0,
+        history_note: `Публично противостоял давлению правителя. Стал открытым врагом.`,
+      };
+    }
+  }
+
+  return {
+    outcome: 'fail',
+    message: 'Неизвестное действие.',
+    loyalty_delta: 0,
+    disposition_delta: 0,
+    gold_spent: 0,
+    history_note: '',
+  };
+}

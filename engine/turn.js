@@ -344,6 +344,11 @@ function initGame() {
     JSON.stringify(INITIAL_CHARACTERS_SYRACUSE)
   );
 
+  // Загружаем сенаторов Рима
+  GAME_STATE.nations.rome.characters = JSON.parse(
+    JSON.stringify(INITIAL_SENATORS_ROME)
+  );
+
   // Попытка загрузки сохранения
   const hasSave = loadGame();
 

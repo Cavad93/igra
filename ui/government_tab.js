@@ -179,6 +179,12 @@ function renderPersonRuler(ruler, nation) {
 
 function renderCouncilRuler(ruler, nation) {
   const memberCount = ruler.character_ids?.length ?? 0;
+
+  // Найти институт-совет/сенат в институтах
+  const senateInst = (nation.government?.institutions ?? []).find(
+    i => i.character_ids?.length && i.type === 'legislative'
+  );
+
   return `
     <div class="gov-section">
       <div class="gov-section-title">🏛 Правящий орган</div>
@@ -189,7 +195,9 @@ function renderCouncilRuler(ruler, nation) {
           Личная власть главы совета: ${ruler.personal_power ?? 20}/100
         </div>
         <div class="gov-council-note">⚖️ Решения принимаются коллегиально</div>
+        ${senateInst ? `<button class="senate-hall-btn" onclick="toggleSenateHall('${senateInst.id}')">🏛 Войти в Зал Сената</button>` : ''}
       </div>
+      <div id="senate-hall-${senateInst?.id ?? 'none'}" style="display:none"></div>
     </div>
   `;
 }
@@ -576,4 +584,314 @@ function formatVoters(s) {
     landowners:     'землевладельцы',
   };
   return map[s] ?? s ?? '?';
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ЗАЛ СЕНАТА — раскрываемая панель с сенаторами по фракциям
+// ══════════════════════════════════════════════════════════════════════
+
+const FACTION_HALL_COLORS = {
+  'Оптиматы':   '#8B4513',
+  'Популяры':   '#1565C0',
+  'Новые люди': '#2E7D32',
+};
+
+function getSenatorDispositionIcon(disp) {
+  if (disp >= 70) return '😄';
+  if (disp >= 55) return '🙂';
+  if (disp >= 40) return '😐';
+  if (disp >= 25) return '😒';
+  return '😠';
+}
+
+function toggleSenateHall(instId) {
+  const nation = GAME_STATE.nations[GAME_STATE.player_nation];
+  const container = document.getElementById(`senate-hall-${instId}`);
+  if (!container) return;
+
+  if (container.style.display !== 'none') {
+    container.style.display = 'none';
+    return;
+  }
+
+  const inst = (nation.government?.institutions ?? []).find(i => i.id === instId);
+  if (!inst) return;
+
+  container.innerHTML = renderSenateHall(inst, nation);
+  container.style.display = 'block';
+}
+
+function renderSenateHall(inst, nation) {
+  const senators = (nation.characters ?? []).filter(
+    c => inst.character_ids?.includes(c.id)
+  );
+
+  if (!senators.length) {
+    return `<div class="gov-text" style="padding:10px 0;color:var(--text-dim)">Сенаторы не назначены. Используйте ✨ Созвать советников для генерации персонажей.</div>`;
+  }
+
+  // Группируем по faction_name
+  const byFaction = {};
+  for (const f of (inst.factions ?? [])) {
+    byFaction[f.name] = { faction: f, senators: [] };
+  }
+  // Сенаторы без фракции — в отдельную группу
+  for (const s of senators) {
+    const key = s.faction_name;
+    if (byFaction[key]) {
+      byFaction[key].senators.push(s);
+    } else {
+      if (!byFaction['']) byFaction[''] = { faction: { name: 'Независимые' }, senators: [] };
+      byFaction[''].senators.push(s);
+    }
+  }
+
+  const groups = Object.values(byFaction).filter(g => g.senators.length);
+
+  const groupsHtml = groups.map(({ faction, senators: sns }) => {
+    const color = FACTION_HALL_COLORS[faction.name] ?? '#555';
+    const leader = sns.find(s => s.id === faction.leader_id);
+
+    const cards = sns.map(s => renderSenatorCard(s, faction.name)).join('');
+
+    return `
+      <div class="senate-faction-group">
+        <div class="senate-faction-header" style="background:${color}22;border-left:3px solid ${color}">
+          <span style="color:${color}">●</span>
+          <span>${faction.name}</span>
+          ${leader ? `<span style="color:${color};font-size:9px">Лидер: ${leader.name.split(' ')[0]}</span>` : ''}
+          <span class="senate-faction-seats">${faction.seats ?? '?'} мест</span>
+        </div>
+        <div class="senate-senators-grid">${cards}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `<div class="senate-hall">${groupsHtml}</div>`;
+}
+
+function renderSenatorCard(senator, factionName) {
+  const disp = senator.disposition ?? 50;
+  const dispIcon = getSenatorDispositionIcon(disp);
+  const loyalty = senator.traits?.loyalty ?? 50;
+  const loyaltyColor = loyalty > 65 ? '#4CAF50' : loyalty > 35 ? '#FF9800' : '#f44336';
+  const wantsStr = (senator.wants ?? []).slice(0, 1).map(w => formatWant(w)).join('');
+  const ambition = senator.ambition_goal ? senator.ambition_goal.replace(/_/g, ' ') : '';
+
+  return `
+    <div class="senator-card" onclick="openSenatorNegotiation('${senator.id}')">
+      <span class="senator-disp">${dispIcon}</span>
+      <div class="senator-card-top">
+        <span class="senator-portrait">${senator.portrait ?? '👤'}</span>
+        <span class="senator-name">${senator.name}</span>
+      </div>
+      <div class="senator-meta">${senator.age} лет · ${wantsStr}</div>
+      <div class="senator-loyalty-bar">
+        <div class="senator-loyalty-fill" style="width:${loyalty}%;background:${loyaltyColor}"></div>
+      </div>
+      ${ambition ? `<div class="senator-ambition">🎯 ${ambition}</div>` : ''}
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// МОДАЛ ПЕРЕГОВОРОВ С СЕНАТОРОМ
+// ══════════════════════════════════════════════════════════════════════
+
+function openSenatorNegotiation(charId) {
+  const nation = GAME_STATE.nations[GAME_STATE.player_nation];
+  const senator = (nation.characters ?? []).find(c => c.id === charId);
+  if (!senator) return;
+
+  // Создаём оверлей если нет
+  let overlay = document.getElementById('senator-negotiate-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'senator-negotiate-overlay';
+    overlay.onclick = e => { if (e.target === overlay) closeSenatorNegotiation(); };
+    document.body.appendChild(overlay);
+  }
+
+  overlay.innerHTML = renderSenatorNegotiationPanel(senator, nation);
+  overlay.style.display = 'flex';
+}
+
+function closeSenatorNegotiation() {
+  const overlay = document.getElementById('senator-negotiate-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function renderSenatorNegotiationPanel(senator, nation) {
+  const disp = senator.disposition ?? 50;
+  const dispIcon = getSenatorDispositionIcon(disp);
+  const dispColor = disp >= 70 ? '#4CAF50' : disp >= 40 ? '#FF9800' : '#f44336';
+
+  const wantsTags = (senator.wants ?? []).map(w =>
+    `<span class="senator-neg-tag want">${formatWant(w)}</span>`
+  ).join('');
+  const fearsTags = (senator.fears ?? []).map(f =>
+    `<span class="senator-neg-tag fear">😰 ${formatWant(f)}</span>`
+  ).join('');
+
+  const treasury = nation.economy?.treasury ?? 0;
+  const actions = getSenatorActions(senator, nation);
+
+  const actionsHtml = actions.map(a => {
+    const chanceClass = a.chance >= 70 ? 'good' : a.chance >= 45 ? 'ok' : 'risky';
+    return `
+      <button class="senator-action-btn" onclick="executeSenatorAction('${senator.id}','${a.id}')"
+              ${a.disabled ? 'disabled' : ''}>
+        <span class="senator-action-title">${a.icon} ${a.label}</span>
+        <span class="senator-action-cost">${a.costText}</span>
+        <span class="senator-action-chance ${chanceClass}">${a.chance}% успеха</span>
+      </button>
+    `;
+  }).join('');
+
+  const historyLast = (senator.history ?? []).slice(-2).reverse().map(
+    h => `<div style="font-size:10px;color:var(--text-dim);margin-top:2px">• ${h.event}</div>`
+  ).join('');
+
+  return `
+    <div class="senator-negotiate-panel">
+      <div class="senator-neg-header">
+        <span class="senator-neg-portrait">${senator.portrait ?? '👤'}</span>
+        <div class="senator-neg-info">
+          <div class="senator-neg-name">${senator.name}</div>
+          <div class="senator-neg-faction">${senator.faction_name ?? '—'} · ${senator.age} лет</div>
+        </div>
+        <button class="senator-neg-close" onclick="closeSenatorNegotiation()">✕</button>
+      </div>
+      <div class="senator-neg-body">
+        <div class="senator-neg-desc">${senator.description ?? ''}</div>
+
+        <div class="senator-neg-disp-row">
+          <span class="senator-neg-disp-label">${dispIcon} Расположение</span>
+          <div class="senator-neg-disp-bar">
+            <div class="senator-neg-disp-fill" style="width:${disp}%;background:${dispColor}"></div>
+          </div>
+          <span class="senator-neg-disp-val">${disp}/100</span>
+        </div>
+
+        ${wantsTags ? `<div class="senator-neg-section">
+          <div class="senator-neg-section-title">✨ Желает</div>
+          <div class="senator-neg-tags">${wantsTags}</div>
+        </div>` : ''}
+        ${fearsTags ? `<div class="senator-neg-section">
+          <div class="senator-neg-section-title">😰 Боится</div>
+          <div class="senator-neg-tags">${fearsTags}</div>
+        </div>` : ''}
+
+        ${senator.ambition_goal ? `
+          <div class="senator-neg-section">
+            <div class="senator-neg-section-title">🎯 Личная амбиция</div>
+            <div style="font-size:11px;color:var(--text-light)">${senator.ambition_goal.replace(/_/g,' ')}</div>
+          </div>` : ''}
+
+        <div class="senator-neg-section">
+          <div class="senator-neg-section-title">⚔️ Действия</div>
+          <div class="senator-neg-actions">${actionsHtml}</div>
+        </div>
+
+        <div id="senator-neg-result"></div>
+
+        ${historyLast ? `<div class="senator-neg-section" style="margin-top:8px">
+          <div class="senator-neg-section-title">📜 Недавно</div>
+          ${historyLast}
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function getSenatorActions(senator, nation) {
+  const disp  = senator.disposition ?? 50;
+  const greed = senator.traits?.greed ?? 50;
+  const caution = senator.traits?.caution ?? 50;
+  const ambition = senator.traits?.ambition ?? 50;
+  const treasury = nation.economy?.treasury ?? 0;
+  const power = nation.government?.power_resource?.current ?? 50;
+
+  // Шанс успеха базируется на расположении + трейтах
+  const bribeCost   = Math.round(500 + greed * 80);
+  const bribeChance = Math.min(90, Math.round(30 + disp * 0.4 + greed * 0.3));
+  const dealChance  = Math.min(85, Math.round(20 + disp * 0.6 - caution * 0.15));
+  const speechChance= Math.min(80, Math.round(25 + disp * 0.5 + ambition * 0.1));
+  const pressChance = Math.min(70, Math.round(10 + power * 0.5 - caution * 0.2));
+
+  return [
+    {
+      id: 'deal',
+      icon: '🤝',
+      label: 'Предложить союз',
+      costText: 'Обещание поддержки одного желания',
+      chance: dealChance,
+      disabled: false,
+    },
+    {
+      id: 'bribe',
+      icon: '💰',
+      label: 'Подкупить',
+      costText: `${bribeCost} золота (казна: ${treasury})`,
+      chance: bribeChance,
+      disabled: treasury < bribeCost,
+    },
+    {
+      id: 'appeal',
+      icon: '🗣',
+      label: 'Апеллировать',
+      costText: 'Апелляция к личным интересам (бесплатно)',
+      chance: speechChance,
+      disabled: false,
+    },
+    {
+      id: 'pressure',
+      icon: '😤',
+      label: 'Надавить',
+      costText: `Использует власть (текущая: ${Math.round(power)})`,
+      chance: pressChance,
+      disabled: power < 20,
+    },
+  ];
+}
+
+function executeSenatorAction(charId, actionId) {
+  const nation = GAME_STATE.nations[GAME_STATE.player_nation];
+  const senator = (nation.characters ?? []).find(c => c.id === charId);
+  if (!senator) return;
+
+  const result = negotiateSenator(charId, GAME_STATE.player_nation, actionId);
+
+  // Применяем изменения
+  senator.disposition = Math.max(0, Math.min(100, (senator.disposition ?? 50) + result.disposition_delta));
+  senator.traits.loyalty = Math.max(0, Math.min(100, (senator.traits?.loyalty ?? 50) + result.loyalty_delta));
+  senator.history = senator.history ?? [];
+  senator.history.push({ turn: GAME_STATE.turn, event: result.history_note });
+
+  if (result.gold_spent > 0) {
+    nation.economy.treasury -= result.gold_spent;
+  }
+
+  // Показываем результат
+  const resultEl = document.getElementById('senator-neg-result');
+  if (resultEl) {
+    resultEl.innerHTML = `
+      <div class="senator-neg-result ${result.outcome}">
+        ${result.message}
+        ${result.loyalty_delta !== 0 ? `<div style="font-size:10px;margin-top:4px">Лояльность: ${result.loyalty_delta > 0 ? '+' : ''}${result.loyalty_delta} · Расположение: ${result.disposition_delta > 0 ? '+' : ''}${result.disposition_delta}</div>` : ''}
+      </div>
+    `;
+  }
+
+  // Обновляем карточку сенатора в зале (если открыта)
+  const inst = (nation.government?.institutions ?? []).find(i => i.character_ids?.includes(charId));
+  if (inst) {
+    const hallEl = document.getElementById(`senate-hall-${inst.id}`);
+    if (hallEl && hallEl.style.display !== 'none') {
+      hallEl.innerHTML = renderSenateHall(inst, nation);
+    }
+  }
+
+  // Блокируем кнопки после действия (один раз за открытие)
+  document.querySelectorAll('.senator-action-btn').forEach(b => b.disabled = true);
 }
