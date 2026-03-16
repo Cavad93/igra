@@ -166,7 +166,155 @@ ${existingCharacters.map(c => c.name).join(', ')}
   }),
 
   // ──────────────────────────────────────────────────────────
-  // 5. ГЕНЕРАЦИЯ СЛУЧАЙНОГО СОБЫТИЯ (расширенная версия)
+  // 5. ПРАВИТЕЛЬСТВО — ПАРСИНГ ОПИСАНИЯ
+  // ──────────────────────────────────────────────────────────
+  parseGovernment: (playerInput, currentGov, charsSummary) => ({
+    system: `Ты — парсер системы правления для исторической стратегии 301 BC.
+Получаешь описание изменений в правительстве и возвращаешь ТОЛЬКО JSON дельту изменений.
+Никакого текста кроме JSON. Никаких пояснений. Никакого markdown.
+
+ТЕКУЩИЕ ТИПЫ ПРАВЛЕНИЯ: republic, monarchy, tyranny, oligarchy, tribal, theocracy, custom
+РЕСУРСЫ ВЛАСТИ: fear, legitimacy, prestige, divine_mandate, wealth, military_loyalty
+МЕТОДЫ РЕШЕНИЙ: majority_vote, unanimous, weighted_by_wealth, single_person, lottery
+
+СХЕМА ДЕЛЬТЫ (возвращай только изменяемые поля):
+{
+  "type": "republic|monarchy|tyranny|...",
+  "custom_name": "название если custom",
+  "legitimacy": 0-100,
+  "stability": 0-100,
+  "ruler": {
+    "type": "person|council|deity_proxy",
+    "name": "имя",
+    "character_ids": ["CHAR_XXXX"],
+    "personal_power": 0-100
+  },
+  "power_resource": {
+    "type": "fear|legitimacy|prestige|...",
+    "current": 0-100
+  },
+  "institutions": [
+    {
+      "id": "уникальный_id",
+      "name": "название",
+      "type": "legislative|executive|military|judicial|religious",
+      "decision_method": "majority_vote|...",
+      "powers": ["список полномочий"],
+      "limitations": ["ограничения"],
+      "factions": [
+        {"id": "f1", "name": "название", "seats": 100, "wants": ["want1"], "color": "#4CAF50"}
+      ]
+    }
+  ],
+  "elections": {
+    "enabled": true,
+    "frequency_turns": 12,
+    "next_election": 8
+  },
+  "succession": {
+    "tracked": true,
+    "heir_character_id": null,
+    "crisis_if_no_heir": true
+  },
+  "conspiracies": {
+    "base_chance": 0.15,
+    "secret_police": {"enabled": false, "cost": 200}
+  },
+  "custom_mechanics": [
+    {"id": "mechanic_id", "name": "название", "description": "описание", "active": true}
+  ],
+  "_instant_change": false
+}`,
+
+    user: `ЗАПРОС ИГРОКА: "${playerInput}"
+
+ТЕКУЩЕЕ ПРАВИТЕЛЬСТВО:
+${JSON.stringify(currentGov, null, 2)}
+
+ПЕРСОНАЖИ ДВОРА:
+${JSON.stringify(charsSummary, null, 2)}
+
+Верни JSON дельту изменений (только те поля, которые нужно изменить).
+Если игрок меняет тип правления — установи _instant_change: false (нужен переходный период).
+Если это мелкая реформа — меняй только нужные поля.`,
+  }),
+
+  // ──────────────────────────────────────────────────────────
+  // 6. ПРАВИТЕЛЬСТВО — РЕАКЦИЯ НА СМЕНУ ФОРМЫ
+  // ──────────────────────────────────────────────────────────
+  governmentChangeReactions: (fromType, toType, characters) => ({
+    system: `Ты — симулятор политических реакций в античном мире 301 BC.
+Отвечай ТОЛЬКО JSON массивом. Без текста вне JSON. Без markdown.
+Каждый персонаж реагирует исходя из своей роли, traits, wants и fears.
+Смена формы правления — политический кризис. Реакции должны быть разнообразными и конфликтными.`,
+
+    user: `Правительство меняется: ${fromType} → ${toType}.
+
+ПЕРСОНАЖИ ДВОРА:
+${JSON.stringify(characters.map(c => ({
+  id: c.id,
+  name: c.name,
+  role: c.role,
+  traits: c.traits,
+  wants: c.wants,
+  fears: c.fears,
+})), null, 2)}
+
+Верни JSON массив реакций:
+[
+  {
+    "character_id": "CHAR_XXXX",
+    "reaction": "support|neutral|oppose|conspire",
+    "reason": "причина в 1 предложении (от лица персонажа)",
+    "action": "что персонаж делает (1 предложение)",
+    "loyalty_delta": -10
+  }
+]`,
+  }),
+
+  // ──────────────────────────────────────────────────────────
+  // 7. ПРАВИТЕЛЬСТВО — ГОЛОСОВАНИЕ В ИНСТИТУТЕ
+  // ──────────────────────────────────────────────────────────
+  institutionVote: (proposalText, institution, members, calculatedEffects, voteResult) => ({
+    system: `Ты — нарратор политических дебатов в античном мире 301 BC.
+Голоса уже посчитаны кодом — ты пишешь только речи и нарратив.
+Отвечай ТОЛЬКО JSON. Никаких пояснений.
+Речи краткие и в духе античной риторики.`,
+
+    user: `ПРЕДЛОЖЕНИЕ: "${proposalText}"
+
+ИНСТИТУТ: ${institution.name} (${institution.decision_method})
+
+УЧАСТНИКИ:
+${JSON.stringify(members, null, 2)}
+
+ЭФФЕКТЫ (если пройдёт):
+${JSON.stringify(calculatedEffects, null, 2)}
+
+РЕЗУЛЬТАТ ГОЛОСОВАНИЯ (уже посчитан):
+${JSON.stringify(voteResult, null, 2)}
+
+Напиши нарратив голосования. Верни JSON:
+{
+  "key_speeches": [
+    {
+      "character_id": "CHAR_XXXX",
+      "character_name": "имя",
+      "position": "for|against",
+      "speech": "речь персонажа (1-3 предложения, античный стиль)"
+    }
+  ],
+  "amendments_proposed": [
+    "текст поправки (если кто-то предлагал)"
+  ],
+  "unexpected_events": [
+    "драматическое событие во время голосования (если уместно)"
+  ]
+}`,
+  }),
+
+  // ──────────────────────────────────────────────────────────
+  // 8. ГЕНЕРАЦИЯ СЛУЧАЙНОГО СОБЫТИЯ (расширенная версия)
   // ──────────────────────────────────────────────────────────
   generateEvent: (gameStateSlice, recentHistory) => ({
     system: `Ты — генератор исторических событий для стратегии 301 BC.

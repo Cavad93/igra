@@ -306,3 +306,120 @@ function getRoleLabel(role) {
   };
   return labels[role] || role;
 }
+
+// ──────────────────────────────────────────────────────────────
+// ПРАВИТЕЛЬСТВО — 3 специализированных вызова
+// ──────────────────────────────────────────────────────────────
+
+// 1. ПАРСИНГ ПРОИЗВОЛЬНОГО ОПИСАНИЯ ПРАВИТЕЛЬСТВА
+async function parseGovernmentDescription(playerInput) {
+  const nation     = GAME_STATE.nations[GAME_STATE.player_nation];
+  const gov        = nation.government;
+  const charsSummary = (nation.characters ?? [])
+    .filter(c => c.alive)
+    .map(c => ({ id: c.id, name: c.name, role: c.role, portrait: c.portrait }));
+
+  const { system, user } = PROMPTS.parseGovernment(playerInput, gov, charsSummary);
+
+  let raw;
+  try {
+    raw = await callClaude(system, user, 1200);
+  } catch (err) {
+    console.warn('parseGovernmentDescription API error:', err);
+    throw new Error('Не удалось связаться с AI. Проверьте API ключ.');
+  }
+
+  // Извлекаем JSON из ответа
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('AI не вернул корректный JSON');
+
+  try {
+    return JSON.parse(jsonMatch[0]);
+  } catch {
+    throw new Error('Ошибка разбора ответа AI');
+  }
+}
+
+// 2. РЕАКЦИЯ ПЕРСОНАЖЕЙ НА СМЕНУ ФОРМЫ ПРАВЛЕНИЯ
+async function getGovernmentChangeReactions(fromType, toType) {
+  const nation     = GAME_STATE.nations[GAME_STATE.player_nation];
+  const characters = (nation.characters ?? []).filter(c => c.alive);
+  if (!characters.length) return [];
+
+  const { system, user } = PROMPTS.governmentChangeReactions(fromType, toType, characters);
+
+  let raw;
+  try {
+    raw = await callClaude(system, user, 1500);
+  } catch (err) {
+    console.warn('getGovernmentChangeReactions API error:', err);
+    // Fallback: детерминированные реакции
+    return characters.map(c => ({
+      character_id: c.id,
+      reaction: c.traits.loyalty > 60 ? 'support' : c.traits.ambition > 70 ? 'oppose' : 'neutral',
+      reason: 'Персонаж оценивает изменения исходя из личных интересов.',
+      action: 'Наблюдает за ситуацией.',
+      loyalty_delta: c.traits.loyalty > 60 ? 2 : -3,
+    }));
+  }
+
+  const jsonMatch = raw.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) return [];
+
+  try {
+    const reactions = JSON.parse(jsonMatch[0]);
+    // Применяем loyalty_delta
+    for (const r of reactions) {
+      const char = characters.find(c => c.id === r.character_id);
+      if (char && typeof r.loyalty_delta === 'number') {
+        char.traits.loyalty = Math.max(0, Math.min(100, char.traits.loyalty + r.loyalty_delta));
+        if (!char.history) char.history = [];
+        char.history.push({ turn: GAME_STATE.turn, event: `Реакция на смену правления: ${r.reaction}. "${r.reason}"` });
+      }
+    }
+    return reactions;
+  } catch {
+    return [];
+  }
+}
+
+// 3. ГОЛОСОВАНИЕ В КОЛЛЕГИАЛЬНОМ ОРГАНЕ (Claude пишет речи)
+async function simulateInstitutionVote(proposalText, institutionId, calculatedEffects) {
+  const nation = GAME_STATE.nations[GAME_STATE.player_nation];
+  const gov    = nation.government;
+  const inst   = (gov.institutions ?? []).find(i => i.id === institutionId);
+  if (!inst) return null;
+
+  // Код считает голоса детерминированно
+  const voteResult = calculateInstitutionVote(inst, nation);
+
+  const members = (nation.characters ?? [])
+    .filter(c => c.alive)
+    .map(c => ({ id: c.id, name: c.name, traits: c.traits, wants: c.wants, fears: c.fears }));
+
+  const { system, user } = PROMPTS.institutionVote(proposalText, inst, members, calculatedEffects, voteResult);
+
+  let raw;
+  try {
+    raw = await callClaude(system, user, 1000);
+  } catch (err) {
+    console.warn('simulateInstitutionVote API error:', err);
+    return { ...voteResult, key_speeches: [], amendments_proposed: [], unexpected_events: [] };
+  }
+
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return { ...voteResult, key_speeches: [], amendments_proposed: [], unexpected_events: [] };
+
+  try {
+    const claudeResult = JSON.parse(jsonMatch[0]);
+    // Код'овые голоса — приоритет над Claude для чисел
+    return {
+      ...voteResult,
+      key_speeches:      claudeResult.key_speeches      ?? [],
+      amendments_proposed: claudeResult.amendments_proposed ?? [],
+      unexpected_events: claudeResult.unexpected_events ?? [],
+    };
+  } catch {
+    return { ...voteResult, key_speeches: [], amendments_proposed: [], unexpected_events: [] };
+  }
+}

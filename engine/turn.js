@@ -32,6 +32,9 @@ async function processTurn() {
     // 1. Экономика (детерминировано)
     runEconomyTick();
 
+    // 1.5. Правительство (детерминировано)
+    processAllGovernmentTicks();
+
     // 2. Население (детерминировано)
     updatePopulationGrowth();
     updateHappiness();

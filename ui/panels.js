@@ -21,11 +21,14 @@ function renderLeftPanel() {
   const deltaStr = delta >= 0 ? `+${Math.round(delta)}` : `${Math.round(delta)}`;
   const deltaClass = delta >= 0 ? 'positive' : 'negative';
 
+  const rulerName = gov.ruler?.name ?? gov.ruler ?? '?';
+  const govTypeName = getGovernmentName(gov.type, gov.custom_name);
+
   panel.innerHTML = `
     <!-- ПРАВИТЕЛЬ -->
     <div class="panel-section ruler-section">
-      <div class="ruler-name">⚔️ ${gov.ruler}</div>
-      <div class="ruler-sub">${getGovernmentName(gov.type)} · ${nation.name}</div>
+      <div class="ruler-name">⚔️ ${rulerName}</div>
+      <div class="ruler-sub">${govTypeName} · ${nation.name}</div>
       <div class="legitimacy-bar">
         <span class="stat-label">Легитимность</span>
         <div class="bar-container">
@@ -33,6 +36,9 @@ function renderLeftPanel() {
         </div>
         <span class="stat-value">${gov.legitimacy}%</span>
       </div>
+      <button class="gov-open-btn" onclick="showGovernmentOverlay()">
+        🏛 Управление государством ▸
+      </button>
     </div>
 
     <!-- КАЗНА -->
@@ -316,15 +322,18 @@ function renderTraitBar(name, value, color) {
 // УТИЛИТЫ
 // ──────────────────────────────────────────────────────────────
 
-function getGovernmentName(type) {
+function getGovernmentName(type, custom_name) {
+  if (type === 'custom' && custom_name) return custom_name;
   const names = {
     tyranny:    'Тирания',
     monarchy:   'Монархия',
     republic:   'Республика',
     oligarchy:  'Олигархия',
     democracy:  'Демократия',
+    tribal:     'Племенной вождизм',
+    theocracy:  'Теократия',
   };
-  return names[type] || type;
+  return names[type] || custom_name || type;
 }
 
 function getHappinessColor(happiness) {

@@ -942,6 +942,197 @@
       :root { --panel-w: 190px; }
       #game-title { font-size: 14px; letter-spacing: 1px; }
     }
+
+    /* ══════════════════════════════════════════════════
+       ОВЕРЛЕЙ ПРАВИТЕЛЬСТВА
+    ══════════════════════════════════════════════════ */
+    #gov-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.72);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000;
+    }
+    .gov-panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-gold);
+      border-radius: 4px;
+      width: min(760px, 96vw);
+      max-height: 88vh;
+      display: flex; flex-direction: column;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+    }
+    .gov-panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-gold);
+      background: rgba(139,69,19,0.15);
+      flex-shrink: 0;
+    }
+    .gov-panel-title { color: var(--accent); font-size: 14px; letter-spacing: 1px; font-weight: bold; }
+    .gov-close-btn {
+      background: none; border: 1px solid var(--border-gold); color: var(--text-gold);
+      width: 22px; height: 22px; border-radius: 2px; cursor: pointer; font-size: 11px;
+      line-height: 1; padding: 0;
+    }
+    .gov-close-btn:hover { background: rgba(212,168,83,0.15); }
+    .gov-panel-body {
+      overflow-y: auto; padding: 12px 14px; flex: 1;
+      scrollbar-width: thin; scrollbar-color: var(--border-gold) transparent;
+    }
+
+    /* Открытие оверлея — кнопка */
+    .gov-open-btn {
+      width: 100%; padding: 5px 8px;
+      background: linear-gradient(to bottom, #3a2508, #251505);
+      border: 1px solid var(--border-gold); border-radius: 2px;
+      color: var(--text-gold); font-size: 11px; cursor: pointer;
+      text-align: left; margin-top: 6px; letter-spacing: 0.5px;
+    }
+    .gov-open-btn:hover { background: linear-gradient(to bottom, #4a3010, #32180a); border-color: var(--accent); }
+
+    /* Секции внутри оверлея */
+    .gov-section {
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(107,79,26,0.35);
+      border-radius: 3px; padding: 10px; margin-bottom: 8px;
+    }
+    .gov-section-title {
+      color: var(--text-gold); font-size: 11px; text-transform: uppercase;
+      letter-spacing: 0.8px; margin-bottom: 7px; opacity: 0.85;
+    }
+    .gov-section-title.clickable { cursor: pointer; user-select: none; }
+    .gov-section-title.clickable:hover { opacity: 1; }
+    .gov-section.collapsed > *:not(.gov-section-title) { display: none; }
+
+    /* Заголовок правительства */
+    .gov-header { margin-bottom: 10px; }
+    .gov-type-badge {
+      font-size: 16px; color: var(--accent); font-weight: bold;
+      letter-spacing: 1px; margin-bottom: 8px;
+    }
+    .gov-metrics { display: flex; flex-direction: column; gap: 5px; }
+    .gov-metric { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+    .gov-metric.small .bar-container { flex: 1; height: 4px; }
+    .gov-metric-label { color: var(--text-dim); min-width: 90px; }
+    .gov-metric-val   { min-width: 32px; text-align: right; font-weight: bold; }
+
+    /* Баннер перехода */
+    .gov-transition-banner {
+      background: rgba(255,152,0,0.1); border: 1px solid #FF9800;
+      border-radius: 3px; padding: 10px; margin-bottom: 8px;
+    }
+    .transition-title  { color: #FF9800; font-weight: bold; font-size: 12px; }
+    .transition-route  { color: var(--text-light); font-size: 13px; margin: 3px 0; }
+    .transition-meta   { color: var(--text-dim); font-size: 11px; }
+    .transition-warning{ color: #FF9800; font-size: 11px; margin-top: 4px; }
+
+    /* Правитель */
+    .gov-ruler-card, .gov-council-card, .gov-deity-card {
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    .gov-ruler-portrait { font-size: 28px; flex-shrink: 0; }
+    .gov-ruler-info { flex: 1; }
+    .gov-ruler-name { color: var(--accent); font-size: 14px; font-weight: bold; }
+    .gov-ruler-role { color: var(--text-dim); font-size: 11px; margin-bottom: 5px; }
+    .gov-council-name, .gov-deity-title { color: var(--accent); font-size: 13px; font-weight: bold; }
+    .gov-council-meta, .gov-council-note, .gov-deity-proxy, .gov-deity-note {
+      color: var(--text-dim); font-size: 11px; margin-top: 3px;
+    }
+    .gov-char-link {
+      background: none; border: 1px solid var(--border-gold); color: var(--text-gold);
+      font-size: 10px; padding: 2px 6px; border-radius: 2px; cursor: pointer; flex-shrink: 0;
+    }
+    .gov-char-link:hover { background: rgba(212,168,83,0.1); }
+
+    /* Ресурс власти */
+    .gov-power-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .bar-container.wide { flex: 1; height: 10px; }
+    .gov-power-val { font-weight: bold; min-width: 45px; text-align: right; }
+    .gov-power-decay { color: var(--text-dim); font-size: 10px; }
+    .gov-power-restore { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .gov-power-warning { color: #FF9800; font-size: 11px; margin-top: 5px; }
+
+    /* Институты */
+    .gov-institution {
+      border: 1px solid rgba(107,79,26,0.5); border-radius: 3px;
+      padding: 8px; margin-bottom: 6px;
+      background: rgba(255,255,255,0.02);
+    }
+    .gov-inst-header { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; flex-wrap: wrap; }
+    .gov-inst-name { color: var(--text-light); font-weight: bold; font-size: 12px; }
+    .gov-inst-type { background: rgba(212,168,83,0.15); color: var(--text-gold); font-size: 10px; padding: 1px 5px; border-radius: 2px; }
+    .gov-inst-size { color: var(--text-dim); font-size: 10px; margin-left: auto; }
+    .gov-inst-method { color: var(--text-dim); font-size: 10px; margin-bottom: 4px; }
+    .gov-inst-powers, .gov-inst-limits { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 3px; }
+
+    /* Теги */
+    .gov-tag { background: rgba(255,255,255,0.07); color: var(--text-dim); font-size: 10px; padding: 1px 5px; border-radius: 2px; }
+    .gov-tag.green { background: rgba(76,175,80,0.15); color: #81C784; }
+    .gov-tag.red   { background: rgba(244,67,54,0.15); color: #EF9A9A; }
+
+    /* Фракции */
+    .gov-factions { margin-top: 6px; }
+    .faction-bar { display: flex; height: 10px; border-radius: 2px; overflow: hidden; margin-bottom: 5px; }
+    .faction-bar-seg { height: 100%; transition: width 0.3s; }
+    .faction-legend { display: flex; flex-direction: column; gap: 3px; }
+    .faction-item { display: flex; align-items: center; gap: 5px; font-size: 10px; }
+    .faction-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .faction-name { color: var(--text-light); flex: 1; }
+    .faction-seats{ color: var(--text-dim); min-width: 40px; }
+    .faction-wants{ color: var(--text-dim); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+
+    /* Выборы, преемственность */
+    .gov-election-row  { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .gov-election-label{ color: var(--text-dim); font-size: 11px; }
+    .gov-election-count{ font-size: 16px; font-weight: bold; }
+    .gov-election-meta, .gov-election-offices { color: var(--text-dim); font-size: 10px; margin-top: 3px; }
+    .gov-heir, .gov-heir-none { font-size: 11px; color: var(--text-light); margin-bottom: 4px; }
+    .gov-heir-none { color: #FF9800; }
+    .gov-claim-types { font-size: 10px; }
+
+    /* Заговоры */
+    .gov-conspiracy-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .gov-sp-row { font-size: 11px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .gov-sp-row.inactive { color: var(--text-dim); }
+    .gov-sp-btn {
+      background: rgba(212,168,83,0.1); border: 1px solid var(--border-gold);
+      color: var(--text-gold); font-size: 10px; padding: 2px 7px; border-radius: 2px; cursor: pointer;
+    }
+    .gov-sp-btn.red { border-color: #f44336; color: #EF9A9A; background: rgba(244,67,54,0.1); }
+    .gov-sp-btn:hover { background: rgba(212,168,83,0.2); }
+
+    /* Кастомные механики */
+    .gov-custom-mech { display: flex; flex-direction: column; gap: 2px; padding: 5px; border-bottom: 1px solid rgba(107,79,26,0.2); }
+    .gov-custom-mech:last-child { border-bottom: none; }
+    .gov-mech-name { color: var(--text-gold); font-size: 11px; font-weight: bold; }
+    .gov-mech-desc { color: var(--text-light); font-size: 11px; }
+    .gov-mech-trigger { font-size: 10px; }
+
+    /* История */
+    .gov-hist-list { display: flex; flex-direction: column; gap: 4px; }
+    .gov-hist-item { color: var(--text-dim); font-size: 10px; border-left: 2px solid var(--border-gold); padding-left: 6px; }
+
+    /* Поле реформы */
+    .gov-reform-section {
+      background: rgba(139,69,19,0.08); border: 1px solid var(--border-gold);
+      border-radius: 3px; padding: 10px; margin-top: 6px;
+    }
+    .gov-reform-hint { color: var(--text-dim); font-size: 10px; margin-bottom: 6px; }
+    .gov-reform-row  { display: flex; gap: 6px; }
+    .gov-reform-text {
+      flex: 1; background: rgba(0,0,0,0.4); border: 1px solid var(--border-gold);
+      color: var(--text-light); font-size: 11px; padding: 5px 8px; border-radius: 2px;
+    }
+    .gov-reform-btn {
+      background: linear-gradient(to bottom, #3a2508, #251505);
+      border: 1px solid var(--border-gold); color: var(--accent);
+      font-size: 11px; padding: 5px 10px; border-radius: 2px; cursor: pointer; white-space: nowrap;
+    }
+    .gov-reform-btn:hover { background: linear-gradient(to bottom, #4a3010, #32180a); }
+    .gov-reform-status { font-size: 11px; margin-top: 5px; }
+    .gov-reform-status.positive { color: #4CAF50; }
+    .gov-reform-status.error    { color: #f44336; }
+    .dim { color: var(--text-dim); }
+    .positive { color: #4CAF50; }
   </style>
 </head>
 <body>
@@ -1027,6 +1218,19 @@
   <div id="char-overlay" onclick="if(event.target===this)closeCharacterDetail()"></div>
   <div id="voting-overlay"></div>
 
+  <!-- Оверлей правительства -->
+  <div id="gov-overlay" onclick="if(event.target===this)hideGovernmentOverlay()" style="display:none">
+    <div class="gov-panel">
+      <div class="gov-panel-header">
+        <span class="gov-panel-title">🏛 Форма правления</span>
+        <button class="gov-close-btn" onclick="hideGovernmentOverlay()">✕</button>
+      </div>
+      <div id="gov-content" class="gov-panel-body">
+        <!-- заполняется renderGovernmentOverlay() -->
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════════════════
        СКРИПТЫ (порядок важен!)
   ═══════════════════════════ -->
@@ -1044,9 +1248,11 @@
 
   <script src="ui/log.js"></script>
   <script src="engine/economy.js"></script>
+  <script src="engine/government.js"></script>
   <script src="engine/turn.js"></script>
   <script src="ui/map.js"></script>
   <script src="ui/panels.js"></script>
+  <script src="ui/government_tab.js"></script>
   <script src="ai/prompts.js"></script>
   <script src="ai/parser.js"></script>
   <script src="ai/claude.js"></script>
