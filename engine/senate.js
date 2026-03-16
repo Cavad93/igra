@@ -462,6 +462,27 @@ class SenateManager {
     const arch         = GAME_STATE?.nations[this.nationId]?.senate_config?.state_architecture;
     const votingSystem = arch?.voting_system ?? 'Meritocracy';
 
+    // ── 6б. Давление / слабость личной власти правителя ───────────────
+    // Сильный правитель (+70): запугивает сенаторов → +10pp поддержки у всех.
+    // Слабый правитель (≤25): авторитет не давит → -8pp поддержки у всех.
+    {
+      const _pp = GAME_STATE.nations[this.nationId]?.government?.ruler?.personal_power ?? 50;
+      let _ppDelta = 0;
+      if      (_pp >= 70) _ppDelta =  10;
+      else if (_pp <= 25) _ppDelta = -8;
+      if (_ppDelta !== 0) {
+        for (const f of this.factions) {
+          mods[f.id] = (mods[f.id] ?? 0) + _ppDelta;
+        }
+        if (this.nationId === GAME_STATE.player_nation) {
+          const label = _ppDelta > 0
+            ? `👑 Давление власти: сенаторы чувствуют силу правителя (+${_ppDelta}% поддержки).`
+            : `😟 Слабость власти: сенаторы не боятся ослушаться (${_ppDelta}% поддержки).`;
+          addEventLog(label, _ppDelta > 0 ? 'info' : 'warning');
+        }
+      }
+    }
+
     // ── 7. Фракционная лояльность → автоматический модификатор ───────
     // Высокая ср. лояльность фракции = бонус к голосам «за»; низкая = штраф.
     const factionStats = this.getFactionStats();

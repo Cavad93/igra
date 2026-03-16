@@ -176,7 +176,7 @@ function renderPersonRuler(ruler, nation) {
         <div class="gov-ruler-info">
           <div class="gov-ruler-name">${ruler.name}</div>
           ${char ? `<div class="gov-ruler-role">${getRoleLabel(char.role)} · ${char.age} лет · ❤️ ${char.health}/100</div>` : ''}
-          <div class="gov-metric small">
+          <div class="gov-metric small" title="Личная власть: концентрация воли правителя.&#10;&#10;Влияет на:&#10;• Голосования: ≥70 → +10% поддержки сенаторов; ≤25 → −8%&#10;• Заговоры: ≥75 → риск ×0.5; ≤25 → риск ×1.8&#10;• Легитимность: ≥70 → +0.3/ход; ≤25 → −0.5/ход&#10;• Стабильность: ≤20 → −1/ход&#10;&#10;Рассчитывается из: тип правления + легитимность + ресурс власти&#10;+ поддержка армии + доминирование фракции − штраф за заговоры">
             <span class="gov-metric-label">Личная власть</span>
             <div class="bar-container"><div class="bar-fill" style="width:${ruler.personal_power ?? 50}%;background:${powerColor}"></div></div>
             <span class="gov-metric-val">${ruler.personal_power ?? 50}</span>
@@ -207,7 +207,7 @@ function renderCouncilRuler(ruler, nation) {
         <div class="gov-council-name">${ruler.name}</div>
         <div class="gov-council-meta">
           Членов: ${memberStr} ·
-          Личная власть главы совета: ${ruler.personal_power ?? 20}/100
+          <span title="Личная власть: концентрация воли главы совета.&#10;&#10;Влияет на:&#10;• Голосования: ≥70 → +10% поддержки; ≤25 → −8%&#10;• Заговоры: ≥75 → риск ×0.5; ≤25 → риск ×1.8&#10;• Легитимность и стабильность при крайних значениях&#10;&#10;Рассчитывается автоматически каждый ход">Личная власть главы совета: ${ruler.personal_power ?? 20}/100</span>
         </div>
         <div class="gov-council-note">⚖️ Решения принимаются коллегиально</div>
       </div>

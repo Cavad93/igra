@@ -101,6 +101,122 @@ function processGovernmentTick(nationId) {
       addEventLog('⚠️ Легитимность власти опасно мала. Государство шатается.', 'danger');
     }
   }
+
+  // 10. Пересчёт личной власти правителя
+  if (gov.ruler) {
+    gov.ruler.personal_power = calculatePersonalPower(nationId);
+
+    // Сильная власть поддерживает легитимность; слабая — подрывает
+    const pp = gov.ruler.personal_power;
+    if (pp > 70) {
+      if (gov.power_resource && ['legitimacy','divine_mandate'].includes(gov.power_resource.type)) {
+        gov.power_resource.current = Math.min(100, gov.power_resource.current + 0.3);
+      }
+      gov.legitimacy = Math.min(100, (gov.legitimacy ?? 50) + 0.3);
+    } else if (pp < 25) {
+      if (gov.power_resource && ['legitimacy','divine_mandate'].includes(gov.power_resource.type)) {
+        gov.power_resource.current = Math.max(0, gov.power_resource.current - 0.5);
+      }
+      gov.legitimacy = Math.max(0, (gov.legitimacy ?? 50) - 0.5);
+    }
+
+    // Очень слабая власть → нестабильность
+    if (pp < 20) {
+      gov.stability = Math.max(0, (gov.stability ?? 50) - 1);
+      if (isPlayer && GAME_STATE.turn % 4 === 0) {
+        addEventLog('😟 Личная власть правителя ничтожна. Фракции борются за влияние.', 'warning');
+      }
+    }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// ЛИЧНАЯ ВЛАСТЬ ПРАВИТЕЛЯ
+// ──────────────────────────────────────────────────────────────────────
+//
+// Формула учитывает:
+//  1. Базу по типу правления
+//  2. Легитимность (мандат народа)
+//  3. Ресурс власти: страх, военная лояльность, престиж, богатство
+//  4. Поддержку армии (для единоличных правителей)
+//  5. Доминирование фракции (для советов)
+//  6. Штраф за активные заговоры
+//  7. Штраф за оппозицию в Сенате
+//
+// Результат: 0–100
+//   0-24  — ничтожная власть, государство нестабильно
+//  25-44  — слабая: трудно проводить законы
+//  45-69  — нормальная: стандартный ход дел
+//  70-84  — сильная: законы проходят легче, заговоры реже
+//  85-100 — тираническая: безграничная воля, но опасность переворота
+
+function calculatePersonalPower(nationId) {
+  const nation = GAME_STATE.nations[nationId];
+  const gov    = nation?.government;
+  if (!gov?.ruler) return 25;
+
+  const ruler   = gov.ruler;
+  const govType = gov.type ?? 'republic';
+
+  // 1. База по типу правления
+  const BASE = { tyranny: 50, monarchy: 45, theocracy: 40, tribal: 35,
+                 oligarchy: 20, republic: 15 };
+  let power = BASE[govType] ?? 25;
+
+  // 2. Легитимность: каждый пункт выше 50 = +0.35; ниже = -0.35
+  const legitimacy = gov.legitimacy ?? 50;
+  power += Math.round((legitimacy - 50) * 0.35);
+
+  // 3. Ресурс власти
+  if (gov.power_resource) {
+    const pr = gov.power_resource.current ?? 50;
+    const mult = { fear: 0.20, military_loyalty: 0.15, prestige: 0.12,
+                   wealth: 0.10, divine_mandate: 0.12, legitimacy: 0.08 };
+    power += Math.round(pr * (mult[gov.power_resource.type] ?? 0.08));
+  }
+
+  // 4. Поддержка армии (только единоличный правитель)
+  if (ruler.type === 'person') {
+    const armyLoy = nation.military?.loyalty ?? 50;
+    if      (armyLoy > 70) power += 10;
+    else if (armyLoy < 30) power -= 15;
+    else                   power += Math.round((armyLoy - 50) * 0.2);
+  }
+
+  // 5. Доминирование фракции (только совет)
+  if (ruler.type === 'council') {
+    const mgr = typeof getSenateManager === 'function' ? getSenateManager(nationId) : null;
+    if (mgr && mgr.senators.length > 0) {
+      const stats = mgr.getFactionStats();
+      const total = mgr.senators.length;
+      const maxSeats = Math.max(...mgr.factions.map(f => stats[f.id]?.seats ?? 0));
+      const dom = (maxSeats / total) * 100;
+      if      (dom > 55) power += 15;   // абсолютное большинство
+      else if (dom > 40) power +=  5;   // относительное большинство
+      else               power -= 10;   // фрагментированный совет
+    }
+  }
+
+  // 6. Штраф за активные заговоры
+  const activeConsp = (nation.conspiracies ?? []).filter(
+    c => ['incubating','growing','detected'].includes(c.status)
+  );
+  for (const c of activeConsp) {
+    power -= 12;
+    if (c.preparation > 80) power -= 15;   // переворот на пороге
+    else if (c.status === 'growing') power -= 5;
+  }
+
+  // 7. Оппозиция в сенате (республика / олигархия)
+  if (['republic','oligarchy'].includes(govType)) {
+    const mgr = typeof getSenateManager === 'function' ? getSenateManager(nationId) : null;
+    if (mgr && mgr.senators.length > 0) {
+      const disloyal = mgr.senators.filter(s => s.loyalty_score < 25).length;
+      power -= Math.round((disloyal / mgr.senators.length) * 30);
+    }
+  }
+
+  return Math.max(0, Math.min(100, Math.round(power)));
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -129,6 +245,12 @@ function calculateConspiracyChance(nation) {
   if (gov.conspiracies?.secret_police?.enabled) {
     chance *= (1 - (gov.conspiracies.secret_police.conspiracy_detection_bonus ?? 0.4));
   }
+
+  // Личная власть: сильный правитель давит заговоры, слабый — провоцирует
+  const pp = gov.ruler?.personal_power ?? 50;
+  if      (pp > 75) chance *= 0.50;   // страшно плести интриги
+  else if (pp < 25) chance *= 1.80;   // все чуют слабость
+  else if (pp < 40) chance *= 1.30;   // повышенный риск
 
   return Math.max(0, Math.min(0.85, chance));
 }

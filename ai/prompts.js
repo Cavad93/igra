@@ -90,7 +90,7 @@ ${JSON.stringify(politicalContext, null, 2)}
 Избегай бездумного повторения одних и тех же действий несколько ходов подряд.`,
 
     user: `ТВОЁ ГОСУДАРСТВО (ключевые метрики):
-Казна: ${nationState.economy?.treasury ?? '?'} | Армия: ${(nationState.military?.infantry ?? 0) + (nationState.military?.cavalry ?? 0) * 3} | Счастье: ${nationState.population?.happiness ?? '?'}%
+Казна: ${nationState.economy?.treasury ?? '?'} | Армия: ${(nationState.military?.infantry ?? 0) + (nationState.military?.cavalry ?? 0) * 3} | Счастье: ${nationState.population?.happiness ?? '?'}% | Личная власть: ${nationState.government?.ruler?.personal_power ?? '?'}/100
 
 СОСЕДИ:
 ${JSON.stringify(neighborsSummary, null, 2)}
