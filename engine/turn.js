@@ -328,6 +328,7 @@ function loadGame() {
       const loadedState = JSON.parse(saved);
       Object.assign(GAME_STATE, loadedState);
       _migrateCharacterIds();
+      _sanitizeInstitutions();
       addEventLog('Игра загружена из сохранения.', 'info');
       return true;
     }
@@ -362,6 +363,16 @@ function _migrateCharacterIds() {
       if (nationKey && rulerIds[nationKey]) {
         nation.government.ruler.character_ids = rulerIds[nationKey];
       }
+    }
+  }
+}
+
+// Удаляет из gov.institutions все объекты без id или name (артефакты AI-дельт)
+function _sanitizeInstitutions() {
+  for (const nation of Object.values(GAME_STATE.nations)) {
+    const insts = nation.government?.institutions;
+    if (Array.isArray(insts)) {
+      nation.government.institutions = insts.filter(i => i?.id && i?.name);
     }
   }
 }

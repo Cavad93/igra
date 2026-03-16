@@ -266,7 +266,8 @@ function getResourceWarning(type, val, gov) {
 // ──────────────────────────────────────────────────────────────────────
 
 function renderInstitutionBlock(inst, nation) {
-  if (!inst) return '';
+  // Пропускаем незаполненные объекты (могут прийти из AI-дельты без имени)
+  if (!inst || !inst.name) return '';
 
   const typeLabel = getInstTypeLabel(inst.type);
   const methodLabel = getDecisionMethodLabel(inst.decision_method);

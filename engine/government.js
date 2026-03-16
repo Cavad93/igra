@@ -305,10 +305,11 @@ function applyGovernmentDelta(nationId, delta) {
     }
   }
 
-  // Институты — мерж по id
+  // Институты — мерж по id; игнорируем объекты без id или name
   if (delta.institutions) {
     if (!gov.institutions) gov.institutions = [];
     for (const newInst of delta.institutions) {
+      if (!newInst?.id || !newInst?.name) continue; // защита от неполных AI-дельт
       const idx = gov.institutions.findIndex(i => i.id === newInst.id);
       if (idx >= 0) {
         gov.institutions[idx] = Object.assign({}, gov.institutions[idx], newInst);
