@@ -510,11 +510,16 @@ function getPowerResourceIcon(type) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// ПЕРЕГОВОРЫ С СЕНАТОРОМ
+// ПЕРЕГОВОРЫ С АКТОРОМ — диспетчер по типу правления
 // ══════════════════════════════════════════════════════════════════════
 
-// Результат: { outcome: 'success'|'partial'|'fail', message, loyalty_delta, disposition_delta, gold_spent, history_note }
+// Алиас для обратной совместимости
 function negotiateSenator(charId, nationId, actionId) {
+  return negotiateActor(charId, nationId, actionId, 'republic');
+}
+
+// Результат: { outcome: 'success'|'partial'|'fail', message, loyalty_delta, disposition_delta, gold_spent, history_note }
+function negotiateActor(charId, nationId, actionId, govType) {
   const nation = GAME_STATE.nations[nationId];
   if (!nation) return null;
 
@@ -688,6 +693,155 @@ function negotiateSenator(charId, nationId, actionId) {
     }
   }
 
+  // ── Тирания ──────────────────────────────────────────────────────
+  if (actionId === 'give_gift') {
+    const giftCost = Math.round(200 + greed * 50);
+    if (treasury < giftCost) return _failResult('Недостаточно золота.');
+    const threshold = Math.min(80, 30 + disp * 0.4 + greed * 0.2);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} принимает дар с поклоном. «Щедрость правителя достойна восхищения».`, loyalty_delta:8, disposition_delta:10, gold_spent:giftCost, history_note:'Принял дар. Доволен.' };
+    return { outcome:'partial', message:`${senator.name} принимает дар, но без лишних слов.`, loyalty_delta:3, disposition_delta:4, gold_spent:giftCost, history_note:'Принял дар. Остался нейтрален.' };
+  }
+
+  if (actionId === 'do_favor') {
+    const threshold = Math.min(80, 25 + disp * 0.55 - caution * 0.1);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} принимает услугу. «Я не забуду этого, правитель».`, loyalty_delta:10, disposition_delta:8, gold_spent:0, history_note:'Принял услугу. Лоялен.' };
+    if (roll < threshold + 25) return { outcome:'partial', message:`${senator.name} благодарит, но насторожённо. «Посмотрим».`, loyalty_delta:3, disposition_delta:2, gold_spent:0, history_note:'Принял услугу осторожно.' };
+    return { outcome:'fail', message:`${senator.name} отклоняет. «Я никому не обязан».`, loyalty_delta:-1, disposition_delta:-2, gold_spent:0, history_note:'Отверг предложение услуги.' };
+  }
+
+  if (actionId === 'flatter') {
+    const threshold = Math.min(50, 15 + disp * 0.25 + ambition * 0.1);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} расцветает. «Правитель видит меня насквозь — и ценит это».`, loyalty_delta:4, disposition_delta:6, gold_spent:0, history_note:'Польщён словами правителя.' };
+    if (roll < threshold + 20) return { outcome:'partial', message:`${senator.name} кивает без особых эмоций.`, loyalty_delta:1, disposition_delta:1, gold_spent:0, history_note:'' };
+    return { outcome:'fail', message:`${senator.name} с прищуром смотрит. «Лесть не трогает меня».`, loyalty_delta:0, disposition_delta:-1, gold_spent:0, history_note:'' };
+  }
+
+  if (actionId === 'intimidate') {
+    if (power < 20) return _failResult('Власть слишком мала для давления.');
+    const threshold = Math.min(65, 10 + power * 0.45 - caution * 0.25);
+    if (roll < threshold * 0.5) return { outcome:'success', message:`${senator.name} бледнеет. «Да… как угодно правителю».`, loyalty_delta:12, disposition_delta:-6, gold_spent:0, history_note:'Запуган. Лоялен из страха.' };
+    if (roll < threshold) return { outcome:'partial', message:`${senator.name} уступает, но помнит. «Хорошо. На этот раз».`, loyalty_delta:5, disposition_delta:-10, gold_spent:0, history_note:'Уступил, затаил злобу.' };
+    return { outcome:'fail', message:`${senator.name} встаёт. «Правитель ошибся, угрожая мне». Скандал.`, loyalty_delta:-8, disposition_delta:-15, gold_spent:0, history_note:'Публично противостоял тирану.' };
+  }
+
+  // ── Монархия ─────────────────────────────────────────────────────
+  if (actionId === 'request_audience') {
+    const threshold = Math.min(75, 15 + disp * 0.5);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} устраивает аудиенцию. «Монарх примет вас завтра».`, loyalty_delta:5, disposition_delta:8, gold_spent:0, history_note:'Открыл доступ к монарху.' };
+    if (roll < threshold + 20) return { outcome:'partial', message:`${senator.name} обещает «попробовать договориться». «Монарх занят».`, loyalty_delta:1, disposition_delta:2, gold_spent:0, history_note:'Обещал помочь с аудиенцией.' };
+    return { outcome:'fail', message:`${senator.name} качает головой. «Монарх не принимает сейчас».`, loyalty_delta:0, disposition_delta:-2, gold_spent:0, history_note:'' };
+  }
+
+  if (actionId === 'court_gift') {
+    const giftCost = Math.round(200 + greed * 50);
+    if (treasury < giftCost) return _failResult('Недостаточно золота.');
+    const threshold = Math.min(80, 25 + disp * 0.35 + greed * 0.3);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} принимает подношение с изысканным поклоном. «Вы знаете, как угодить двору».`, loyalty_delta:9, disposition_delta:11, gold_spent:giftCost, history_note:'Принял дар. Расположение выросло.' };
+    return { outcome:'partial', message:`${senator.name} принимает, но сдержанно. «Любезно с вашей стороны».`, loyalty_delta:3, disposition_delta:4, gold_spent:giftCost, history_note:'Принял дар.' };
+  }
+
+  if (actionId === 'offer_service') {
+    const threshold = Math.min(80, 20 + disp * 0.6 - caution * 0.15);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} оживляется. «Именно такая помощь нужна двору. Я замолвлю слово за вас».`, loyalty_delta:8, disposition_delta:10, gold_spent:0, history_note:'Принял предложение службы. Союзник.' };
+    if (roll < threshold + 20) return { outcome:'partial', message:`${senator.name} обдумывает. «Возможно, это будет полезно».`, loyalty_delta:2, disposition_delta:3, gold_spent:0, history_note:'Рассматривает предложение.' };
+    return { outcome:'fail', message:`${senator.name} отказывает. «Двор не нуждается в этом».`, loyalty_delta:0, disposition_delta:-2, gold_spent:0, history_note:'' };
+  }
+
+  if (actionId === 'intrigue') {
+    const threshold = Math.min(65, 10 + disp * 0.4 - caution * 0.2);
+    if (roll < threshold * 0.4) return { outcome:'success', message:`${senator.name} принимает игру. «Хорошо. Позаботьтесь о нём, пока он не стал проблемой».`, loyalty_delta:7, disposition_delta:-3, gold_spent:0, history_note:'Участвует в интриге.' };
+    if (roll < threshold) return { outcome:'partial', message:`${senator.name} уклончиво. «Я буду… иметь это в виду».`, loyalty_delta:2, disposition_delta:0, gold_spent:0, history_note:'Осторожно принял намёк.' };
+    return { outcome:'fail', message:`${senator.name} хмурится. «Интриги — не моё дело». Теперь насторожён.`, loyalty_delta:-3, disposition_delta:-8, gold_spent:0, history_note:'Отверг интригу. Стал подозрительным.' };
+  }
+
+  // ── Олигархия ────────────────────────────────────────────────────
+  if (actionId === 'business_deal') {
+    const threshold = Math.min(80, 20 + disp * 0.5 + greed * 0.2);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} щёлкает пальцами. «По рукам. Составим контракт».`, loyalty_delta:9, disposition_delta:10, gold_spent:0, history_note:'Заключил деловое соглашение.' };
+    if (roll < threshold + 20) return { outcome:'partial', message:`${senator.name} изучает условия. «Нужно подумать. Детали пришлите письмом».`, loyalty_delta:2, disposition_delta:3, gold_spent:0, history_note:'Рассматривает деловое предложение.' };
+    return { outcome:'fail', message:`${senator.name} откидывается. «Условия меня не устраивают». Переговоры закрыты.`, loyalty_delta:0, disposition_delta:-3, gold_spent:0, history_note:'Отверг деловое предложение.' };
+  }
+
+  if (actionId === 'trade_alliance') {
+    const threshold = Math.min(75, 15 + disp * 0.45);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} протягивает руку. «Долгосрочный союз выгоден нам обоим».`, loyalty_delta:11, disposition_delta:12, gold_spent:0, history_note:'Заключил торговый альянс.' };
+    if (roll < threshold + 25) return { outcome:'partial', message:`${senator.name} кивает. «Интересно. Но нужны гарантии».`, loyalty_delta:3, disposition_delta:4, gold_spent:0, history_note:'Рассматривает торговый альянс.' };
+    return { outcome:'fail', message:`${senator.name} отмахивается. «Вы не тот партнёр, который мне нужен».`, loyalty_delta:0, disposition_delta:-4, gold_spent:0, history_note:'' };
+  }
+
+  if (actionId === 'econ_pressure') {
+    if (power < 30) return _failResult('Недостаточно власти для экономического давления.');
+    const threshold = Math.min(60, 10 + power * 0.4 - caution * 0.3);
+    if (roll < threshold * 0.5) return { outcome:'success', message:`${senator.name} чувствует угрозу торговым путям. «Хорошо. Я поддержу вас».`, loyalty_delta:10, disposition_delta:-4, gold_spent:0, history_note:'Уступил экономическому давлению.' };
+    if (roll < threshold) return { outcome:'partial', message:`${senator.name} зажат. «Вы играете нечестно. Но… договоримся».`, loyalty_delta:4, disposition_delta:-10, gold_spent:0, history_note:'Поддался давлению, недоволен.' };
+    return { outcome:'fail', message:`${senator.name} твёрдо. «Угрозы не работают с людьми моего уровня. Запомните это».`, loyalty_delta:-6, disposition_delta:-14, gold_spent:0, history_note:'Противостоял давлению. Враждебен.' };
+  }
+
+  // ── Племя ────────────────────────────────────────────────────────
+  if (actionId === 'tribal_gifts') {
+    const giftCost = Math.round(200 + greed * 50);
+    if (treasury < giftCost) return _failResult('Недостаточно золота.');
+    const threshold = Math.min(85, 30 + disp * 0.4 + greed * 0.2);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} принимает дары с поднятой рукой. «Ты щедр, как вождь должен быть!»`, loyalty_delta:10, disposition_delta:12, gold_spent:giftCost, history_note:'Принял дары. Честь выросла.' };
+    return { outcome:'partial', message:`${senator.name} принимает, но без лишних слов.`, loyalty_delta:4, disposition_delta:5, gold_spent:giftCost, history_note:'Принял дары.' };
+  }
+
+  if (actionId === 'battle_glory') {
+    const threshold = Math.min(80, 20 + disp * 0.5 + power * 0.2);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} поднимает кулак. «Только сильный вождь бьёт так! Племя за тобой!»`, loyalty_delta:12, disposition_delta:10, gold_spent:0, history_note:'Признал боевую славу вождя.' };
+    if (roll < threshold + 25) return { outcome:'partial', message:`${senator.name} кивает. «Война покажет истину».`, loyalty_delta:3, disposition_delta:3, gold_spent:0, history_note:'' };
+    return { outcome:'fail', message:`${senator.name} презрительно. «Мало слов о битве — покажи дело».`, loyalty_delta:-1, disposition_delta:-3, gold_spent:0, history_note:'Не впечатлён словами о боевой славе.' };
+  }
+
+  if (actionId === 'ritual') {
+    const ritualCost = Math.round(300 + (senator.traits?.piety??50) * 30);
+    if (treasury < ritualCost) return _failResult('Недостаточно золота для обряда.');
+    const threshold = Math.min(85, 30 + (senator.traits?.piety??50) * 0.4 + disp * 0.3);
+    if (roll < threshold) return { outcome:'success', message:`Обряд прошёл. ${senator.name} смотрит в огонь. «Духи довольны. Ты — наш вождь».`, loyalty_delta:14, disposition_delta:12, gold_spent:ritualCost, history_note:'Провёл обряд вместе с вождём. Духи довольны.' };
+    if (roll < threshold + 20) return { outcome:'partial', message:`Обряд завершён. ${senator.name} задумчив. «Духи молчат. Но ты уважаешь традиции».`, loyalty_delta:5, disposition_delta:6, gold_spent:ritualCost, history_note:'Провёл обряд. Духи молчали.' };
+    return { outcome:'fail', message:`Обряд прерван дурным знамением. ${senator.name} мрачен. «Боги не довольны тобой сегодня».`, loyalty_delta:-3, disposition_delta:-5, gold_spent:ritualCost, history_note:'Обряд дал плохое знамение.' };
+  }
+
+  if (actionId === 'duel_challenge') {
+    const threshold = Math.min(60, 10 + power * 0.5 - caution * 0.3);
+    if (roll < threshold * 0.4) return { outcome:'success', message:`${senator.name} принимает вызов — и уступает. «Ты вождь! Племя склонилось перед тобой!»`, loyalty_delta:18, disposition_delta:8, gold_spent:0, history_note:'Проиграл поединок вождю. Признаёт силу.' };
+    if (roll < threshold) return { outcome:'partial', message:`Поединок ничейный. ${senator.name} дышит тяжело. «Ты достоин. Пусть будет мир».`, loyalty_delta:7, disposition_delta:5, gold_spent:0, history_note:'Поединок с вождём закончился миром.' };
+    return { outcome:'fail', message:`${senator.name} побеждает. «Твоя сила мала. Где вождь, который ведёт нас?»`, loyalty_delta:-10, disposition_delta:-12, gold_spent:0, history_note:'Победил вождя в поединке. Авторитет вождя упал.' };
+  }
+
+  // ── Теократия ────────────────────────────────────────────────────
+  if (actionId === 'temple_donation') {
+    const ritualCost = Math.round(300 + (senator.traits?.piety??50) * 30);
+    if (treasury < ritualCost) return _failResult('Недостаточно золота для пожертвования.');
+    const threshold = Math.min(85, 30 + (senator.traits?.piety??50) * 0.45 + disp * 0.25);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} воздевает руки. «Боги видят твою щедрость! Ты будешь благословлён».`, loyalty_delta:12, disposition_delta:14, gold_spent:ritualCost, history_note:'Принял пожертвование. Доволен.' };
+    if (roll < threshold + 20) return { outcome:'partial', message:`${senator.name} кивает. «Боги примут твой дар. Продолжай в том же духе».`, loyalty_delta:5, disposition_delta:6, gold_spent:ritualCost, history_note:'Принял пожертвование.' };
+    return { outcome:'fail', message:`${senator.name} хмурится. «Боги хотят большего, чем монеты. Покажи веру делами».`, loyalty_delta:0, disposition_delta:-2, gold_spent:ritualCost, history_note:'Пожертвование было сочтено недостаточным.' };
+  }
+
+  if (actionId === 'cite_omen') {
+    const threshold = Math.min(75, 20 + (senator.traits?.piety??50) * 0.4 + disp * 0.2);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} слушает внимательно. «Если знамение истинно — воля богов ясна. Я поддержу тебя».`, loyalty_delta:9, disposition_delta:10, gold_spent:0, history_note:'Убеждён знамением. Поддерживает.' };
+    if (roll < threshold + 20) return { outcome:'partial', message:`${senator.name} задумывается. «Нужно истолковать знамение точнее».`, loyalty_delta:2, disposition_delta:3, gold_spent:0, history_note:'Осторожно отнёсся к знамению.' };
+    return { outcome:'fail', message:`${senator.name} качает головой. «Это не знамение. Ты интерпретируешь знаки неверно».`, loyalty_delta:-1, disposition_delta:-4, gold_spent:0, history_note:'Отверг интерпретацию знамения.' };
+  }
+
+  if (actionId === 'sponsor_ritual') {
+    const ritualCost = Math.round(300 + (senator.traits?.piety??50) * 30);
+    if (treasury < ritualCost * 2) return _failResult('Недостаточно золота для ритуала.');
+    const threshold = Math.min(90, 40 + (senator.traits?.piety??50) * 0.4 + disp * 0.3);
+    if (roll < threshold) return { outcome:'success', message:`Ритуал проведён. ${senator.name} преклоняет колено. «Боги говорили сегодня. Через тебя».`, loyalty_delta:16, disposition_delta:14, gold_spent:ritualCost*2, history_note:'Спонсировал великий ритуал. Боги довольны.' };
+    if (roll < threshold + 15) return { outcome:'partial', message:`Ритуал завершён. ${senator.name} серьёзен. «Боги приняли жертву. Но от тебя ждут большего».`, loyalty_delta:7, disposition_delta:6, gold_spent:ritualCost*2, history_note:'Ритуал проведён. Частичный успех.' };
+    return { outcome:'fail', message:`Ритуал прерван. ${senator.name} бледнеет. «Знак неблагоприятен. Боги гневаются».`, loyalty_delta:-4, disposition_delta:-8, gold_spent:ritualCost*2, history_note:'Ритуал дал плохое знамение.' };
+  }
+
+  if (actionId === 'spiritual_alliance') {
+    const threshold = Math.min(70, 15 + (senator.traits?.piety??50) * 0.35 + disp * 0.35);
+    if (roll < threshold) return { outcome:'success', message:`${senator.name} складывает руки. «Мы оба служим богам. Пусть союз будет угоден им».`, loyalty_delta:10, disposition_delta:11, gold_spent:0, history_note:'Заключил духовный союз.' };
+    if (roll < threshold + 20) return { outcome:'partial', message:`${senator.name} обдумывает. «Союз возможен, если твои дела будут угодны богам».`, loyalty_delta:3, disposition_delta:4, gold_spent:0, history_note:'Рассматривает духовный союз.' };
+    return { outcome:'fail', message:`${senator.name} отказывает. «Боги не велели мне этого».`, loyalty_delta:0, disposition_delta:-3, gold_spent:0, history_note:'' };
+  }
+
   return {
     outcome: 'fail',
     message: 'Неизвестное действие.',
@@ -696,4 +850,8 @@ function negotiateSenator(charId, nationId, actionId) {
     gold_spent: 0,
     history_note: '',
   };
+}
+
+function _failResult(msg) {
+  return { outcome:'fail', message:msg, loyalty_delta:0, disposition_delta:0, gold_spent:0, history_note:'' };
 }

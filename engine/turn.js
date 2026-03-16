@@ -345,9 +345,12 @@ function initGame() {
   );
 
   // Загружаем сенаторов Рима
-  GAME_STATE.nations.rome.characters = JSON.parse(
-    JSON.stringify(INITIAL_SENATORS_ROME)
-  );
+  GAME_STATE.nations.rome.characters = JSON.parse(JSON.stringify(INITIAL_SENATORS_ROME));
+  // Загружаем акторов остальных наций
+  GAME_STATE.nations.carthage.characters = JSON.parse(JSON.stringify(INITIAL_COUNCIL_CARTHAGE));
+  GAME_STATE.nations.egypt.characters    = JSON.parse(JSON.stringify(INITIAL_COURT_EGYPT));
+  GAME_STATE.nations.macedon.characters  = JSON.parse(JSON.stringify(INITIAL_HETAIROI_MACEDON));
+  GAME_STATE.nations.numidia.characters  = JSON.parse(JSON.stringify(INITIAL_ELDERS_NUMIDIA));
 
   // Попытка загрузки сохранения
   const hasSave = loadGame();
