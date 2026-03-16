@@ -267,10 +267,7 @@ function renderInstitutionBlock(inst, nation) {
   const typeLabel = getInstTypeLabel(inst.type);
   const methodLabel = getDecisionMethodLabel(inst.decision_method);
 
-  const factionHtml = inst.factions?.length
-    ? renderFactionList(inst.factions)
-    : '';
-
+  // Фракции не показываем — они визуализируются в Зале Сената/Совета
   const powersHtml = inst.powers?.length
     ? `<div class="gov-inst-powers">${inst.powers.map(p => `<span class="gov-tag green">${formatWant(p)}</span>`).join('')}</div>`
     : '';
@@ -289,7 +286,6 @@ function renderInstitutionBlock(inst, nation) {
       <div class="gov-inst-method">⚖️ ${methodLabel ?? inst.decision_method ?? '—'}${inst.quorum ? ` · Кворум: ${inst.quorum}%` : ''}</div>
       ${powersHtml}
       ${limitsHtml}
-      ${factionHtml}
     </div>
   `;
 }
@@ -777,48 +773,58 @@ function buildRoyalCourtContent(gov, nation) {
 
 // ── ЗАЛ СЕНАТА (республика) ──────────────────────────────────────────
 function buildSenateContent(gov, nation) {
-  // Ищем любой институт с привязанными персонажами
-  const senateInst = (gov.institutions ?? []).find(i => i.character_ids?.length) ?? null;
+  const insts = gov.institutions ?? [];
 
-  const senators = senateInst
-    ? (nation.characters ?? []).filter(c => senateInst.character_ids.includes(c.id))
+  // Институт с реальными персонажами (для интерактивных мест)
+  const charInst    = insts.find(i => i.character_ids?.length) ?? null;
+  // Институт с данными о фракциях и числе мест (может быть другим)
+  const factionInst = insts.find(i => i.factions?.some(f => f.seats)) ?? charInst;
+
+  const senators = charInst
+    ? (nation.characters ?? []).filter(c => charInst.character_ids.includes(c.id))
     : (nation.characters ?? []);
 
-  if (!senators.length) return renderEmptyHall('Членов нет. Используйте ✨ Созвать советников.');
+  if (!senators.length && !factionInst?.factions?.length)
+    return renderEmptyHall('Членов нет. Используйте ✨ Созвать советников.');
 
-  const instFactions = senateInst?.factions ?? [];
+  // Строим группы фракций из того института, где есть данные о местах
+  const rawFactions = factionInst?.factions ?? [];
+  const byFaction   = {};
 
-  // Группируем по фракциям
-  const byFaction = {};
-  for (const f of instFactions) byFaction[f.name] = { faction: f, senators: [] };
-  if (!Object.keys(byFaction).length) byFaction[''] = { faction: { name: 'Сенат' }, senators: [] };
+  if (rawFactions.length) {
+    for (const f of rawFactions) byFaction[f.name] = { faction: f, senators: [] };
+  } else {
+    byFaction[''] = { faction: { name: 'Сенат' }, senators: [] };
+  }
 
+  // Привязываем реальных персонажей к фракциям
   for (const s of senators) {
     const key = s.faction_name ?? '';
-    if (byFaction[key] !== undefined) byFaction[key].senators.push(s);
-    else {
-      if (!byFaction['']) byFaction[''] = { faction: { name: 'Независимые' }, senators: [] };
-      byFaction[''].senators.push(s);
+    if (byFaction[key] !== undefined) {
+      byFaction[key].senators.push(s);
+    } else {
+      // Персонаж без фракции → в первую фракцию (лидер/представитель)
+      const firstKey = Object.keys(byFaction)[0];
+      byFaction[firstKey].senators.push(s);
     }
   }
 
-  const groups = Object.values(byFaction).filter(g => g.senators.length);
-  const total  = senators.length;
+  const groups  = Object.values(byFaction);
+  const total   = groups.reduce((s, g) => s + (g.faction.seats ?? g.senators.length), 0);
   const majority = Math.floor(total / 2) + 1;
 
-  // SVG-диаграмма зала
   const svgHtml = _buildParliamentSVG(groups, total);
 
-  // Легенда фракций с кнопками для переговоров с лидерами
   const legend = groups.map(({ faction, senators: sns }, gi) => {
-    const color = getFactionColor(faction.name || 'Сенат', gi);
-    const leader = sns.find(s => s.id === faction.leader_id) ?? sns[0];
+    const color       = getFactionColor(faction.name || 'Сенат', gi);
+    const seatCount   = faction.seats ?? sns.length;
+    const leader      = sns.find(s => s.id === faction.leader_id) ?? sns[0] ?? null;
     const leaderFirst = leader?.name?.split(' ')[0] ?? '';
     return `
       <div class="parl-faction-row">
         <span class="parl-faction-dot" style="background:${color}"></span>
         <span class="parl-faction-name">${faction.name || 'Сенат'}</span>
-        <span class="parl-faction-count">${sns.length}</span>
+        <span class="parl-faction-count">${seatCount}</span>
         ${leader ? `<button class="parl-leader-btn" onclick="openActorNegotiation('${leader.id}')"
           title="Переговоры с лидером фракции">${leader.portrait ?? '👤'} ${leaderFirst}</button>` : ''}
       </div>`;
@@ -827,7 +833,7 @@ function buildSenateContent(gov, nation) {
   return `
     <div class="parliament-container">
       <div class="parliament-header">
-        <span class="parliament-title">Зал Сената · ${total} членов</span>
+        <span class="parliament-title">Зал Сената · ${total} мест</span>
         <span class="parliament-majority">Для большинства: ${majority}</span>
       </div>
       ${svgHtml}
@@ -838,17 +844,15 @@ function buildSenateContent(gov, nation) {
 function _buildParliamentSVG(groups, total) {
   const W = 340, H = 195;
   const cx = W / 2, cy = H - 6;
-  const SR = 7;    // радиус кресла
-  const SEP = 19;  // расстояние между центрами
+  const SEP = total > 60 ? 14 : total > 30 ? 17 : 20; // плотность зависит от числа мест
 
-  // Ряды от центра к краям (внутренний → внешний)
+  // Ряды: радиусы от внутреннего к внешнему
   const rowRadii = [];
-  for (let r = 52; r <= 175; r += 30) rowRadii.push(r);
-  // ≈ [52, 82, 112, 142, 172]
+  for (let r = 48; r <= 178; r += (SEP + 5)) rowRadii.push(r);
 
   const caps = rowRadii.map(r => Math.max(3, Math.floor(Math.PI * r / SEP)));
 
-  // Распределяем кресла по рядам (внутренний первым)
+  // Распределяем полное число мест по рядам
   const rows = [];
   let rem = total;
   for (let i = 0; i < rowRadii.length && rem > 0; i++) {
@@ -857,18 +861,29 @@ function _buildParliamentSVG(groups, total) {
     rem -= n;
   }
 
-  // Плоский список кресел с цветами (по фракциям слева направо)
-  const seats = [];
+  // Плоский список всех мест: сначала реальные персонажи, потом анонимные
+  const allSeats = [];
   groups.forEach((g, gi) => {
-    const color = getFactionColor(g.faction.name || 'Сенат', gi);
-    g.senators.forEach(s => {
-      const isLeader = s.id === g.faction.leader_id || (gi === seats.filter(x => x.color === color).length && g.senators.indexOf(s) === 0);
-      seats.push({ color, id: s.id, name: s.name, portrait: s.portrait ?? '👤',
-                   isLeader: s.id === (g.faction.leader_id ?? g.senators[0]?.id) });
-    });
+    const color       = getFactionColor(g.faction.name || 'Сенат', gi);
+    const seatCount   = g.faction.seats ?? g.senators.length;
+    const namedIds    = new Set(g.senators.map(s => s.id));
+    const leaderId    = g.faction.leader_id ?? g.senators[0]?.id ?? null;
+
+    // Реальные персонажи
+    for (const s of g.senators) {
+      allSeats.push({ color, id: s.id, name: s.name,
+                      interactive: true, isLeader: s.id === leaderId });
+    }
+    // Анонимные кресла до нужного числа мест
+    for (let i = g.senators.length; i < seatCount; i++) {
+      allSeats.push({ color, id: null,
+                      name: `${g.faction.name || 'Сенат'} · сенатор`,
+                      interactive: false, isLeader: false });
+    }
   });
 
-  // Рисуем круги
+  // Размещаем кресла по рядам
+  const SR_NAMED = 7, SR_ANON = 5.5;
   let idx = 0;
   const circles = [];
   for (const row of rows) {
@@ -876,24 +891,32 @@ function _buildParliamentSVG(groups, total) {
       const angle = Math.PI * (1 - (i + 0.5) / row.n);
       const x = +(cx + row.r * Math.cos(angle)).toFixed(1);
       const y = +(cy - row.r * Math.sin(angle)).toFixed(1);
-      const seat = seats[idx++];
+      const seat = allSeats[idx++];
       if (!seat) break;
-      const ring = seat.isLeader
-        ? `stroke="#FFD700" stroke-width="2.5"`
-        : `stroke="rgba(0,0,0,0.4)" stroke-width="0.8"`;
-      circles.push(
-        `<circle cx="${x}" cy="${y}" r="${SR}" fill="${seat.color}" ${ring} ` +
-        `class="parl-seat" onclick="openActorNegotiation('${seat.id}')">` +
-        `<title>${seat.name}${seat.isLeader ? ' ★ лидер' : ''}</title></circle>`
-      );
+
+      if (seat.interactive) {
+        const ring = seat.isLeader
+          ? `stroke="#FFD700" stroke-width="2.5"`
+          : `stroke="rgba(255,255,255,0.5)" stroke-width="1.2"`;
+        circles.push(
+          `<circle cx="${x}" cy="${y}" r="${SR_NAMED}" fill="${seat.color}" ${ring} ` +
+          `class="parl-seat" onclick="openActorNegotiation('${seat.id}')">` +
+          `<title>${seat.name}${seat.isLeader ? ' ★ лидер' : ''}</title></circle>`
+        );
+      } else {
+        circles.push(
+          `<circle cx="${x}" cy="${y}" r="${SR_ANON}" fill="${seat.color}" ` +
+          `opacity="0.55" stroke="rgba(0,0,0,0.25)" stroke-width="0.5">` +
+          `<title>${seat.name}</title></circle>`
+        );
+      }
     }
   }
 
-  // Горизонтальная линия-основание зала
   const baseY = (cy + 2).toFixed(1);
-  const baseLine = `<line x1="0" y1="${baseY}" x2="${W}" y2="${baseY}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>`;
+  const base  = `<line x1="0" y1="${baseY}" x2="${W}" y2="${baseY}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>`;
 
-  return `<svg viewBox="0 0 ${W} ${H}" class="parliament-svg">${baseLine}${circles.join('')}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" class="parliament-svg">${base}${circles.join('')}</svg>`;
 }
 
 // ── ТОРГОВЫЙ СОВЕТ (олигархия) ────────────────────────────────────────
