@@ -118,12 +118,12 @@ class ConspiracyEngine {
 
       const target = nonMembers[Math.floor(Math.random() * nonMembers.length)];
 
-      const sameClан   = target.clan_id && target.clan_id === leader.clan_id;
+      const sameClan   = target.clan_id && target.clan_id === leader.clan_id;
       const sharedInterest = (target.hidden_interests ?? []).some(
         i => (leader.hidden_interests ?? []).includes(i)
       );
 
-      if (target.loyalty_score < 30 && (sameClан || sharedInterest)) {
+      if (target.loyalty_score < 30 && (sameClan || sharedInterest)) {
         cons.members.push(target.id);
         // Каждый новый участник снижает скрытность
         cons.conspiracy_stealth = Math.max(5, cons.conspiracy_stealth - 3);
