@@ -598,6 +598,12 @@ const FACTION_HALL_COLORS = {
   'Земельная аристократия':'#4E342E',
 };
 
+const FACTION_AUTO_COLORS = ['#3A86D4','#D44040','#3EA858','#D4942A','#9B5DC4','#38A0A0','#C4704A','#5C5CC4'];
+
+function getFactionColor(name, idx) {
+  return FACTION_HALL_COLORS[name] ?? FACTION_AUTO_COLORS[idx % FACTION_AUTO_COLORS.length];
+}
+
 const HALL_META = {
   tyranny:    { icon: '⚔️',  name: 'Тронный зал',         btnLabel: '⚔️ Войти в тронный зал',        css: 'hall-tyranny'   },
   monarchy:   { icon: '👑',  name: 'Королевский двор',    btnLabel: '👑 Войти в королевский двор',   css: 'hall-monarchy'  },
@@ -774,14 +780,12 @@ function buildSenateContent(gov, nation) {
   // Ищем любой институт с привязанными персонажами
   const senateInst = (gov.institutions ?? []).find(i => i.character_ids?.length) ?? null;
 
-  // Все персонажи нации как запасной вариант (работает после реформ и при загрузке сохранений)
   const senators = senateInst
     ? (nation.characters ?? []).filter(c => senateInst.character_ids.includes(c.id))
     : (nation.characters ?? []);
 
   if (!senators.length) return renderEmptyHall('Членов нет. Используйте ✨ Созвать советников.');
 
-  // Передаём фракции из найденного института или пустой массив
   const instFactions = senateInst?.factions ?? [];
 
   // Группируем по фракциям
@@ -790,8 +794,8 @@ function buildSenateContent(gov, nation) {
   if (!Object.keys(byFaction).length) byFaction[''] = { faction: { name: 'Сенат' }, senators: [] };
 
   for (const s of senators) {
-    const key = s.faction_name;
-    if (byFaction[key]) byFaction[key].senators.push(s);
+    const key = s.faction_name ?? '';
+    if (byFaction[key] !== undefined) byFaction[key].senators.push(s);
     else {
       if (!byFaction['']) byFaction[''] = { faction: { name: 'Независимые' }, senators: [] };
       byFaction[''].senators.push(s);
@@ -799,21 +803,97 @@ function buildSenateContent(gov, nation) {
   }
 
   const groups = Object.values(byFaction).filter(g => g.senators.length);
-  return groups.map(({ faction, senators: sns }) => {
-    const color = FACTION_HALL_COLORS[faction.name] ?? '#555';
-    const leader = sns.find(s => s.id === faction.leader_id);
-    const cards  = sns.map(s => renderActorCard(s, 'republic')).join('');
+  const total  = senators.length;
+  const majority = Math.floor(total / 2) + 1;
+
+  // SVG-диаграмма зала
+  const svgHtml = _buildParliamentSVG(groups, total);
+
+  // Легенда фракций с кнопками для переговоров с лидерами
+  const legend = groups.map(({ faction, senators: sns }, gi) => {
+    const color = getFactionColor(faction.name || 'Сенат', gi);
+    const leader = sns.find(s => s.id === faction.leader_id) ?? sns[0];
+    const leaderFirst = leader?.name?.split(' ')[0] ?? '';
     return `
-      <div class="senate-faction-group">
-        <div class="senate-faction-header" style="background:${color}22;border-left:3px solid ${color}">
-          <span style="color:${color}">●</span>
-          <span>${faction.name}</span>
-          ${leader ? `<span style="color:${color};font-size:9px">Лидер: ${leader.name.split(' ')[0]}</span>` : ''}
-          <span class="senate-faction-seats">${faction.seats ?? '?'} мест</span>
-        </div>
-        <div class="senate-senators-grid">${cards}</div>
+      <div class="parl-faction-row">
+        <span class="parl-faction-dot" style="background:${color}"></span>
+        <span class="parl-faction-name">${faction.name || 'Сенат'}</span>
+        <span class="parl-faction-count">${sns.length}</span>
+        ${leader ? `<button class="parl-leader-btn" onclick="openActorNegotiation('${leader.id}')"
+          title="Переговоры с лидером фракции">${leader.portrait ?? '👤'} ${leaderFirst}</button>` : ''}
       </div>`;
   }).join('');
+
+  return `
+    <div class="parliament-container">
+      <div class="parliament-header">
+        <span class="parliament-title">Зал Сената · ${total} членов</span>
+        <span class="parliament-majority">Для большинства: ${majority}</span>
+      </div>
+      ${svgHtml}
+      <div class="parl-legend">${legend}</div>
+    </div>`;
+}
+
+function _buildParliamentSVG(groups, total) {
+  const W = 340, H = 195;
+  const cx = W / 2, cy = H - 6;
+  const SR = 7;    // радиус кресла
+  const SEP = 19;  // расстояние между центрами
+
+  // Ряды от центра к краям (внутренний → внешний)
+  const rowRadii = [];
+  for (let r = 52; r <= 175; r += 30) rowRadii.push(r);
+  // ≈ [52, 82, 112, 142, 172]
+
+  const caps = rowRadii.map(r => Math.max(3, Math.floor(Math.PI * r / SEP)));
+
+  // Распределяем кресла по рядам (внутренний первым)
+  const rows = [];
+  let rem = total;
+  for (let i = 0; i < rowRadii.length && rem > 0; i++) {
+    const n = Math.min(rem, caps[i]);
+    rows.push({ r: rowRadii[i], n });
+    rem -= n;
+  }
+
+  // Плоский список кресел с цветами (по фракциям слева направо)
+  const seats = [];
+  groups.forEach((g, gi) => {
+    const color = getFactionColor(g.faction.name || 'Сенат', gi);
+    g.senators.forEach(s => {
+      const isLeader = s.id === g.faction.leader_id || (gi === seats.filter(x => x.color === color).length && g.senators.indexOf(s) === 0);
+      seats.push({ color, id: s.id, name: s.name, portrait: s.portrait ?? '👤',
+                   isLeader: s.id === (g.faction.leader_id ?? g.senators[0]?.id) });
+    });
+  });
+
+  // Рисуем круги
+  let idx = 0;
+  const circles = [];
+  for (const row of rows) {
+    for (let i = 0; i < row.n; i++) {
+      const angle = Math.PI * (1 - (i + 0.5) / row.n);
+      const x = +(cx + row.r * Math.cos(angle)).toFixed(1);
+      const y = +(cy - row.r * Math.sin(angle)).toFixed(1);
+      const seat = seats[idx++];
+      if (!seat) break;
+      const ring = seat.isLeader
+        ? `stroke="#FFD700" stroke-width="2.5"`
+        : `stroke="rgba(0,0,0,0.4)" stroke-width="0.8"`;
+      circles.push(
+        `<circle cx="${x}" cy="${y}" r="${SR}" fill="${seat.color}" ${ring} ` +
+        `class="parl-seat" onclick="openActorNegotiation('${seat.id}')">` +
+        `<title>${seat.name}${seat.isLeader ? ' ★ лидер' : ''}</title></circle>`
+      );
+    }
+  }
+
+  // Горизонтальная линия-основание зала
+  const baseY = (cy + 2).toFixed(1);
+  const baseLine = `<line x1="0" y1="${baseY}" x2="${W}" y2="${baseY}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>`;
+
+  return `<svg viewBox="0 0 ${W} ${H}" class="parliament-svg">${baseLine}${circles.join('')}</svg>`;
 }
 
 // ── ТОРГОВЫЙ СОВЕТ (олигархия) ────────────────────────────────────────

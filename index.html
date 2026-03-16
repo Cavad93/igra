@@ -1168,6 +1168,65 @@
       display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
       gap: 5px;
     }
+
+    /* ── PARLIAMENT SVG DIAGRAM ───────────────────────────────────── */
+    .parliament-container {
+      padding: 6px 0 2px;
+    }
+    .parliament-header {
+      display: flex; align-items: baseline; justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .parliament-title {
+      font-size: 11px; font-weight: bold; color: var(--text-light);
+    }
+    .parliament-majority {
+      font-size: 10px; color: var(--text-dim);
+    }
+    .parliament-svg {
+      display: block; width: 100%; max-height: 200px;
+      background: rgba(0,0,0,0.18); border-radius: 6px 6px 0 0;
+      border: 1px solid rgba(255,255,255,0.06); border-bottom: none;
+    }
+    .parl-seat {
+      cursor: pointer;
+      transition: r 0.1s, filter 0.1s;
+    }
+    .parl-seat:hover {
+      filter: brightness(1.35) drop-shadow(0 0 3px currentColor);
+    }
+    .parl-legend {
+      background: rgba(0,0,0,0.15);
+      border: 1px solid rgba(255,255,255,0.06); border-top: none;
+      border-radius: 0 0 6px 6px;
+      padding: 6px 8px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .parl-faction-row {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 11px;
+    }
+    .parl-faction-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .parl-faction-name {
+      flex: 1; color: var(--text-light);
+    }
+    .parl-faction-count {
+      font-weight: bold; color: var(--text-dim);
+      min-width: 16px; text-align: right;
+    }
+    .parl-leader-btn {
+      background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 3px; padding: 2px 7px; cursor: pointer;
+      font-size: 10px; color: var(--text-light);
+      transition: background 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .parl-leader-btn:hover {
+      background: rgba(255,255,255,0.14); border-color: var(--border-gold);
+    }
     .senator-card {
       background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
       border-radius: 4px; padding: 6px 8px; cursor: pointer;
