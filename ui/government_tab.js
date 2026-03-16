@@ -278,11 +278,11 @@ function renderInstitutionBlock(inst, nation) {
   return `
     <div class="gov-institution">
       <div class="gov-inst-header">
-        <span class="gov-inst-name">${inst.name}</span>
-        <span class="gov-inst-type">${typeLabel}</span>
+        <span class="gov-inst-name">${inst.name ?? '?'}</span>
+        ${typeLabel ? `<span class="gov-inst-type">${typeLabel}</span>` : ''}
         ${inst.size ? `<span class="gov-inst-size">${inst.size} чел.</span>` : ''}
       </div>
-      <div class="gov-inst-method">⚖️ ${methodLabel}${inst.quorum ? ` · Кворум: ${inst.quorum}%` : ''}</div>
+      <div class="gov-inst-method">⚖️ ${methodLabel ?? inst.decision_method ?? '—'}${inst.quorum ? ` · Кворум: ${inst.quorum}%` : ''}</div>
       ${powersHtml}
       ${limitsHtml}
       ${factionHtml}

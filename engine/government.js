@@ -482,7 +482,7 @@ function getPowerResourceName(type) {
     wealth:           'Богатство',
     military_loyalty: 'Воинская верность',
   };
-  return names[type] ?? type;
+  return names[type] ?? type ?? '—';
 }
 
 function getPowerResourceColor(type) {
