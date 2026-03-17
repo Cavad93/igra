@@ -525,6 +525,26 @@ class SenateManager {
         support  = Math.max(0, Math.min(1, support));
       }
 
+      // ── Исходы диалога с игроком ──────────────────────────────
+      // Читаем LTS-теги из персонажа, соответствующего этому сенатору
+      {
+        const _charNation = GAME_STATE.nations[this.nationId];
+        const _sChar = (_charNation?.characters ?? []).find(c => c.id === senator.id);
+        const _lts   = _sChar?.dialogue?.lts_tags ?? [];
+
+        // Долгосрочный союз: +20pp на все голосования
+        if (_lts.includes('[Allied_With_Player]')) {
+          support = Math.min(1, support + 0.20);
+        }
+
+        // Разовая поддержка: +15pp только на следующее голосование, затем тег снимается
+        if (_lts.includes('[Supports_Player_Request]')) {
+          support = Math.min(1, support + 0.15);
+          const idx = _lts.indexOf('[Supports_Player_Request]');
+          if (idx !== -1) _lts.splice(idx, 1);
+        }
+      }
+
       // Вес голоса
       let weight = 1;
       if (votingSystem === 'Plutocracy') {

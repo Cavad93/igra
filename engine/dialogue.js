@@ -63,8 +63,14 @@ const DIALOGUE_ENGINE = (() => {
     // 2. Получить ответ персонажа (Sonnet — сессия горячая)
     const response = await _getCharacterResponse(char, text, intent, nation);
 
-    // 3. Применить игровые эффекты
+    // 3. Применить базовые эффекты (лояльность, деньги, тирания)
     const effects = _applyEffects(char, intent, response, nation);
+
+    // 3b. Применить исход сделки если персонаж согласился (accept: true)
+    if (response.accept) {
+      const outcomes = _applyOutcome(char, intent, response, nation);
+      effects.push(...outcomes);
+    }
 
     // 4. Сохранить в горячую память
     _addToHotMemory(char, text, response.reply, intent);
@@ -180,14 +186,18 @@ const DIALOGUE_ENGINE = (() => {
 Определи намерение игрока. Учитывай косвенные формулировки, метафоры, намёки.
 
 Типы намерений:
-  bribe        — предлагает деньги, ценности, выгоду (явно или косвенно)
-  alliance     — предлагает политический союз, общие интересы, блок
-  threat       — угрожает, шантажирует, намекает на последствия
-  flatter      — льстит, хвалит, превозносит
-  request      — просит о помощи, поддержке, голосовании, услуге
-  info_request — хочет узнать что-то, спрашивает о событиях, слухах
-  insult       — оскорбляет, унижает, проявляет неуважение
-  conversation — нейтральная беседа, не подпадает под остальные
+  bribe             — предлагает деньги, ценности, выгоду (явно или косвенно)
+  alliance          — предлагает политический союз, долгосрочный блок, взаимную поддержку
+  request           — просит об одноразовой помощи, поддержке закона, услуге, голосовании
+  conspiracy_join   — предлагает персонажу вступить в заговор, переворот, тайный план против кого-то
+  conspiracy_betray — просит персонажа предать, раскрыть или остановить существующий заговор
+  military_support  — просит военной помощи, поддержки армией, стратегического союза (к генералам)
+  trade_deal        — предлагает торговую сделку, экономическое соглашение (к купцам)
+  threat            — угрожает, шантажирует, намекает на последствия
+  flatter           — льстит, хвалит, превозносит
+  info_request      — хочет узнать что-то, спрашивает о событиях, слухах
+  insult            — оскорбляет, унижает, проявляет неуважение
+  conversation      — нейтральная беседа, не подпадает под остальные
 
 Верни ТОЛЬКО JSON без markdown:
 {"type":"bribe","amount":500,"confidence":0.9}
@@ -287,6 +297,14 @@ ${recentLines ? `ПРЕДЫДУЩИЙ КОНТЕКСТ:\n${recentLines}\n\n` : '
         return `Просит о поддержке. Лояльность ${char.traits.loyalty}/100 определяет готовность помочь.`;
       case 'info_request':
         return `Хочет информацию. Осторожность ${char.traits.caution ?? 50}/100 влияет на откровенность.`;
+      case 'conspiracy_join':
+        return `Предлагает вступить в тайный заговор или переворот. Честолюбие ${char.traits.ambition}/100, лояльность ${char.traits.loyalty}/100. Высокое честолюбие и низкая лояльность = склонен согласиться.`;
+      case 'conspiracy_betray':
+        return `Просит предать или раскрыть существующий заговор. Осторожность ${char.traits.caution ?? 50}/100. Страх репрессий vs лояльность правителю.`;
+      case 'military_support':
+        return `Просит военной поддержки. Актуально для полководцев и военных. Лояльность ${char.traits.loyalty}/100.`;
+      case 'trade_deal':
+        return `Предлагает торговую сделку. Актуально для купцов. Жадность ${char.traits.greed}/100 влияет на условия.`;
       case 'insult':
         return `Оскорбляет или неуважителен. Персонаж должен выразить гнев или холодное презрение.`;
       default:
@@ -339,6 +357,134 @@ ${recentLines ? `ПРЕДЫДУЩИЙ КОНТЕКСТ:\n${recentLines}\n\n` : '
     }
 
     return effects;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // ИСХОД СДЕЛКИ — вызывается только когда response.accept = true
+  // Переводит согласие персонажа в конкретные игровые состояния.
+  // ─────────────────────────────────────────────────────────────
+
+  function _applyOutcome(char, intent, response, nation) {
+    const outcomes = [];
+    const lts = char.dialogue.lts_tags;
+    const nId = GAME_STATE.player_nation;
+
+    const _addLTS = tag => { if (!lts.includes(tag)) lts.push(tag); };
+    const _logChar = event => {
+      (char.history ?? (char.history = [])).push({ turn: GAME_STATE.turn, event });
+    };
+
+    switch (intent.type) {
+
+      // ── СОЮЗ ──────────────────────────────────────────────────
+      // Долгосрочный: союзник поддерживает ВСЕ законы игрока в сенате.
+      case 'alliance': {
+        _addLTS('[Allied_With_Player]');
+        // Удаляем тег врага если был
+        const enemyIdx = lts.indexOf('[Known_Enemy]');
+        if (enemyIdx !== -1) lts.splice(enemyIdx, 1);
+        char.traits.loyalty = Math.min(100, char.traits.loyalty + 10);
+        _logChar('Заключил политический союз с правителем.');
+        if (nId === GAME_STATE.player_nation) {
+          addEventLog(`🤝 ${char.name} вступил в союз — он поддержит ваши законы в Сенате.`, 'good');
+        }
+        outcomes.push({ type: 'alliance_formed', char: char.name });
+        break;
+      }
+
+      // ── ОДНОРАЗОВАЯ ПОДДЕРЖКА ─────────────────────────────────
+      // Разовое: поддержит СЛЕДУЮЩИЙ закон игрока (+15pp в голосовании).
+      case 'request': {
+        _addLTS('[Supports_Player_Request]');
+        _logChar('Пообещал поддержать следующий закон правителя.');
+        if (nId === GAME_STATE.player_nation) {
+          addEventLog(`📜 ${char.name} обещал поддержать ваш следующий закон.`, 'info');
+        }
+        outcomes.push({ type: 'request_support', char: char.name });
+        break;
+      }
+
+      // ── ВСТУПЛЕНИЕ В ЗАГОВОР ИГРОКА ───────────────────────────
+      // Персонаж соглашается участвовать в тайном плане игрока.
+      case 'conspiracy_join': {
+        _addLTS('[Player_Conspirator]');
+        // Помечаем флаг на самом персонаже для работы conspiracy engine
+        char.player_conspiracy_member = true;
+        _logChar('Согласился участвовать в тайном замысле правителя.');
+        if (nId === GAME_STATE.player_nation) {
+          addEventLog(`🗡️ ${char.name} согласился — теперь он участник вашего замысла.`, 'warning');
+        }
+        outcomes.push({ type: 'joined_player_conspiracy', char: char.name });
+        break;
+      }
+
+      // ── ПРЕДАТЕЛЬСТВО ЗАГОВОРА ────────────────────────────────
+      // Персонаж раскрывает/разрушает заговор в котором состоит.
+      case 'conspiracy_betray': {
+        const conspiracies = GAME_STATE.nations[nId]?.conspiracies ?? [];
+        const cons = conspiracies.find(c =>
+          ['incubating','growing','detected'].includes(c.status) &&
+          (c.members ?? []).includes(char.id)
+        );
+        if (cons) {
+          // Наносим ущерб заговору
+          cons.conspiracy_stealth  = Math.max(0,  (cons.conspiracy_stealth ?? 50)  - 40);
+          cons.preparation         = Math.max(0,  (cons.preparation        ?? 0)   - 30);
+          cons.detected_by_player  = true;
+          cons.status              = 'detected';
+          // Удаляем предателя из членов
+          const idx = cons.members.indexOf(char.id);
+          if (idx !== -1) cons.members.splice(idx, 1);
+          char.conspiracy_id              = null;
+          char.is_conspiracy_leader       = false;
+          _addLTS('[Betrayed_Conspiracy]');
+          _logChar(`Предал заговор ${cons.leader_name} — раскрыл его правителю.`);
+          addEventLog(
+            `🔍 ${char.name} раскрыл заговор «${cons.manifest?.name ?? cons.leader_name}»! Скрытность упала до ${cons.conspiracy_stealth}. Подготовка сброшена.`,
+            'good'
+          );
+          outcomes.push({ type: 'conspiracy_betrayed', conspiracy_id: cons.id });
+        } else {
+          // Персонаж не состоит ни в каком известном заговоре — просто тег
+          _addLTS('[Loyal_Informant]');
+          _logChar('Пообещал сообщать о заговорах при дворе.');
+          addEventLog(`👁 ${char.name} станет вашим осведомителем при дворе.`, 'info');
+          outcomes.push({ type: 'informant_recruited', char: char.name });
+        }
+        break;
+      }
+
+      // ── ВОЕННАЯ ПОДДЕРЖКА (генерал) ───────────────────────────
+      case 'military_support': {
+        if (char.role === 'general') {
+          const mil = nation.military;
+          if (mil) {
+            mil.loyalty  = Math.min(100, (mil.loyalty  ?? 50) + 8);
+            mil.morale   = Math.min(100, (mil.morale   ?? 50) + 5);
+          }
+          _addLTS('[Military_Ally]');
+          _logChar('Пообещал личную военную поддержку правителю.');
+          addEventLog(`⚔️ ${char.name} поддержал армию — лояльность войск +8, боевой дух +5.`, 'good');
+          outcomes.push({ type: 'military_support', char: char.name, loyalty_delta: 8, morale_delta: 5 });
+        }
+        break;
+      }
+
+      // ── ТОРГОВАЯ СДЕЛКА (купец) ───────────────────────────────
+      case 'trade_deal': {
+        if (char.role === 'merchant') {
+          const bonus = Math.round(200 + (char.traits.greed ?? 50) * 5);
+          nation.economy.treasury = (nation.economy.treasury ?? 0) + bonus;
+          _addLTS('[Trade_Partner]');
+          _logChar(`Заключил торговую сделку с правителем (+${bonus} золота).`);
+          addEventLog(`💼 ${char.name} заключил сделку — казна пополнилась на ${bonus} золота.`, 'good');
+          outcomes.push({ type: 'trade_deal', char: char.name, gold: bonus });
+        }
+        break;
+      }
+    }
+
+    return outcomes;
   }
 
   // ─────────────────────────────────────────────────────────────
