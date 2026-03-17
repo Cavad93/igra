@@ -1361,7 +1361,7 @@ function closeActorNegotiation() {
 function openSenatorNegotiation(charId) { openActorNegotiation(charId); }
 function closeSenatorNegotiation()       { closeActorNegotiation(); }
 
-function renderActorNegotiationPanel(actor, nation) {
+function renderActorNegotiationPanel(actor, nation, extraHtml = '') {
   const govType = nation.government?.type ?? 'tyranny';
   const disp    = actor.disposition ?? 50;
   const dispColor = disp >= 70 ? '#4CAF50' : disp >= 40 ? '#FF9800' : '#f44336';
@@ -1418,6 +1418,7 @@ function renderActorNegotiationPanel(actor, nation) {
         </div>
         <div id="senator-neg-result"></div>
         ${historyLast ? `<div class="senator-neg-section" style="margin-top:8px"><div class="senator-neg-section-title">📜 Недавно</div>${historyLast}</div>` : ''}
+        ${extraHtml}
       </div>
     </div>`;
 }
@@ -1784,7 +1785,7 @@ function openSenatorCard(senatorId, nationId) {
     overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
     document.body.appendChild(overlay);
   }
-  overlay.innerHTML = renderActorNegotiationPanel(pseudo, nation) + actionBtns;
+  overlay.innerHTML = renderActorNegotiationPanel(pseudo, nation, actionBtns);
   overlay.style.display = 'flex';
 }
 
