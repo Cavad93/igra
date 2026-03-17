@@ -138,54 +138,84 @@ const DIALOGUE_ENGINE = (() => {
 
   // ─────────────────────────────────────────────────────────────
   // ОПРЕДЕЛЕНИЕ НАМЕРЕНИЙ
+  //
+  // Всегда используем Haiku 4.5 с полным контекстом:
+  //   — черты персонажа и его теги
+  //   — последние 4 реплики горячей памяти (контекст разговора)
+  //   — текст игрока
+  //
+  // Это позволяет распознавать непрямые формулировки:
+  //   «Я слышал ты любишь монеты... вот триста штук» → bribe, amount:300
+  //   «Наши интересы совпадают» → alliance
+  //   «Твои дни сочтены, если ты откажешь» → threat
+  //
+  // Regex используется ТОЛЬКО как вспомогательный экстрактор числа суммы,
+  // чтобы не терять его если Haiku вернул тип bribe без amount.
   // ─────────────────────────────────────────────────────────────
 
-  async function _detectIntent(text, char, nation) {
-    const lower = text.toLowerCase();
-
-    // ПОДКУП — число + денежное слово
-    const moneyM = lower.match(/(\d[\d\s]*)\s*(золот|монет|талант|денар|статер)/);
-    if (moneyM) {
-      const amount = parseInt(moneyM[1].replace(/\s/g, ''));
-      return { type: 'bribe', amount, confidence: 0.92 };
-    }
-
-    // СОЮЗ
-    if (/\b(союз|альянс|объединим(ся)?|вместе|коалиц|блок)\b/.test(lower))
-      return { type: 'alliance', confidence: 0.88 };
-
-    // УГРОЗА / ШАНТАЖ
-    if (/\b(угрожа|шантаж|иначе|пожалеешь|накажу|арестую|казню|изгоню|пожалей)\b/.test(lower))
-      return { type: 'threat', confidence: 0.88 };
-
-    // ЛЕСТЬ
-    if (/\b(велик|мудр|достоин|восхища|прослав|уважа|горжусь)\b/.test(lower))
-      return { type: 'flatter', confidence: 0.82 };
-
-    // ПРОСЬБА
-    if (/\b(прошу|помог|поддерж|голосуй|проголосуй|нужна твоя)\b/.test(lower))
-      return { type: 'request', confidence: 0.82 };
-
-    // ИНФОРМАЦИЯ
-    if (/\b(расскажи|что знаеш|слышал|говорят|узнать|сообщи)\b/.test(lower))
-      return { type: 'info_request', confidence: 0.78 };
-
-    // Неясно — классифицируем через Haiku (дёшево и быстро)
-    return _classifyWithHaiku(text, char);
+  // Вспомогательно: вытащить число из текста (для bribe amount)
+  function _extractAmount(text) {
+    const m = text.match(/(\d[\d\s]*)\s*(золот|монет|талант|денар|статер|штук)?/);
+    if (!m) return null;
+    const n = parseInt(m[1].replace(/\s/g, ''));
+    return isNaN(n) ? null : n;
   }
 
-  async function _classifyWithHaiku(text, char) {
+  async function _detectIntent(text, char, nation) {
+    // Контекст: последние 4 реплики (2 пары)
+    const recentLines = (char.dialogue.hot_memory ?? []).slice(-4)
+      .map(m => `${m.role === 'player' ? 'Игрок' : char.name}: ${m.text}`)
+      .join('\n');
+
+    // Профиль персонажа для классификатора
+    const profile = [
+      `Имя: ${char.name}`,
+      `Черты: жадность ${char.traits.greed}/100, честолюбие ${char.traits.ambition}/100,`,
+      `  лояльность ${char.traits.loyalty}/100, осторожность ${char.traits.caution ?? 50}/100`,
+      `Теги: ${_buildTags(char)}`,
+    ].join('\n');
+
+    const systemPrompt = `Ты — анализатор намерений игрока в исторической стратегии 301 до н.э.
+Получаешь профиль персонажа, контекст разговора и реплику игрока.
+Определи намерение игрока. Учитывай косвенные формулировки, метафоры, намёки.
+
+Типы намерений:
+  bribe        — предлагает деньги, ценности, выгоду (явно или косвенно)
+  alliance     — предлагает политический союз, общие интересы, блок
+  threat       — угрожает, шантажирует, намекает на последствия
+  flatter      — льстит, хвалит, превозносит
+  request      — просит о помощи, поддержке, голосовании, услуге
+  info_request — хочет узнать что-то, спрашивает о событиях, слухах
+  insult       — оскорбляет, унижает, проявляет неуважение
+  conversation — нейтральная беседа, не подпадает под остальные
+
+Верни ТОЛЬКО JSON без markdown:
+{"type":"bribe","amount":500,"confidence":0.9}
+Поле amount — только для bribe, иначе не включай. confidence: 0.0–1.0.`;
+
+    const userPrompt = `ПЕРСОНАЖ:
+${profile}
+
+${recentLines ? `ПРЕДЫДУЩИЙ КОНТЕКСТ:\n${recentLines}\n\n` : ''}ИГРОК ГОВОРИТ: "${text}"`;
+
     try {
-      const raw = await callClaude(
-        'Classify player intent in this ancient strategy game conversation. Return ONLY valid JSON, nothing else: {"type":"bribe|alliance|threat|flatter|request|info_request|conversation|insult","confidence":0.5}',
-        `Character: ${char.name}\nPlayer says: "${text}"`,
-        80,
-        CONFIG.MODEL_HAIKU
-      );
-      const parsed = JSON.parse(raw.trim());
-      return { type: parsed.type ?? 'conversation', confidence: parsed.confidence ?? 0.5 };
+      const raw = await callClaude(systemPrompt, userPrompt, 100, CONFIG.MODEL_HAIKU);
+      const match = raw.match(/\{[\s\S]*?\}/);
+      if (!match) throw new Error('no json');
+      const parsed = JSON.parse(match[0]);
+
+      // Если bribe но нет amount — пробуем вытащить из текста
+      if (parsed.type === 'bribe' && !parsed.amount) {
+        parsed.amount = _extractAmount(text) ?? 0;
+      }
+      return {
+        type:       parsed.type       ?? 'conversation',
+        amount:     parsed.amount,
+        confidence: parsed.confidence ?? 0.6,
+      };
     } catch (_) {
-      return { type: 'conversation', confidence: 0.5 };
+      // Крайний fallback — разговор без классификации
+      return { type: 'conversation', confidence: 0.3 };
     }
   }
 
