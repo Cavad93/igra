@@ -1348,7 +1348,8 @@ function openActorNegotiation(charId) {
     document.body.appendChild(overlay);
   }
 
-  overlay.innerHTML = renderActorNegotiationPanel(actor, nation);
+  const dlgBlock = renderDialogueBlock(charId, actor.name ?? actor.court_role ?? '?', GAME_STATE.player_nation);
+  overlay.innerHTML = renderActorNegotiationPanel(actor, nation, dlgBlock);
   overlay.style.display = 'flex';
 }
 
@@ -1756,19 +1757,6 @@ function openSenatorCard(senatorId, nationId) {
     ...(s.hidden_interests   ?? []).map(i => `❓${i}`)
   ].join(', ') || '—';
 
-  // Определяем terпение и историю диалога персонажа для отображения
-  const charForChat = (nation.characters ?? []).find(c => c.id === s.id);
-  const patience    = charForChat?.dialogue?.patience_score ?? 100;
-  const patienceColor = patience > 60 ? '#4CAF50' : patience > 30 ? '#FF9800' : '#f44336';
-  const chatHistory = (charForChat?.dialogue?.hot_memory ?? []).slice(-10);
-  const chatHistoryHtml = chatHistory.map(m => {
-    const isPlayer = m.role === 'player';
-    return `<div class="dlg-msg ${isPlayer ? 'dlg-player' : 'dlg-char'}">
-      <span class="dlg-msg-label">${isPlayer ? '👑 Вы' : s.name}</span>
-      <span class="dlg-msg-text">${m.text}</span>
-    </div>`;
-  }).join('');
-
   const actionBtns = `
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
       <button style="background:${canBribe ? 'rgba(255,215,0,0.15)' : 'rgba(255,255,255,0.05)'};
@@ -1790,29 +1778,7 @@ function openSenatorCard(senatorId, nationId) {
       ${isLeader ? ' · 👑 Лидер фракции' : ''}
     </div>
 
-    <!-- ══ СВОБОДНЫЙ ДИАЛОГ ══ -->
-    <div class="dlg-section">
-      <div class="dlg-section-header">
-        <span class="dlg-section-title">💬 Свободный разговор</span>
-        <span class="dlg-patience-bar" title="Терпение персонажа">
-          <span style="font-size:10px;color:#aaa;">Терпение:</span>
-          <span class="dlg-patience-track">
-            <span class="dlg-patience-fill" style="width:${patience}%;background:${patienceColor}"></span>
-          </span>
-          <span style="font-size:10px;color:${patienceColor}">${patience}%</span>
-        </span>
-      </div>
-      <div class="dlg-history" id="dlg-history-${s.id}">
-        ${chatHistoryHtml || '<div class="dlg-empty">Начните разговор — напишите что-нибудь ниже.</div>'}
-      </div>
-      <div class="dlg-input-row">
-        <textarea class="dlg-input" id="dlg-input-${s.id}"
-          placeholder="Говорите с ${s.name}... (предложите союз, подкуп, угрозу — своими словами)"
-          rows="2" onkeydown="dlgHandleKey(event,'${s.id}','${nationId}')"></textarea>
-        <button class="dlg-send-btn" onclick="dlgSend('${s.id}','${nationId}')" title="Отправить (Enter)">➤</button>
-      </div>
-      <div class="dlg-status" id="dlg-status-${s.id}"></div>
-    </div>
+    ${renderDialogueBlock(s.id, s.name, nationId)}
   `;
 
   let overlay = document.getElementById('senator-negotiate-overlay');
@@ -1965,6 +1931,54 @@ function submitSenateLaw(nationId) {
 // ══════════════════════════════════════════════════════════════════════
 // СВОБОДНЫЙ ДИАЛОГ С ПЕРСОНАЖЕМ
 // ══════════════════════════════════════════════════════════════════════
+
+// Общий рендер блока диалога — используется в ЛЮБОЙ панели персонажа.
+// charId    — id персонажа
+// charName  — имя для placeholder
+// nationId  — нация (строка); null → GAME_STATE.player_nation
+function renderDialogueBlock(charId, charName, nationId) {
+  const nId    = nationId ?? GAME_STATE.player_nation;
+  const nation = GAME_STATE.nations[nId];
+  const char   = (nation?.characters ?? []).find(c => c.id === charId);
+
+  const patience      = char?.dialogue?.patience_score ?? 100;
+  const patienceColor = patience > 60 ? '#4CAF50' : patience > 30 ? '#FF9800' : '#f44336';
+  const hotMemory     = (char?.dialogue?.hot_memory ?? []).slice(-10);
+
+  const historyHtml = hotMemory.map(m => {
+    const isPlayer = m.role === 'player';
+    return `<div class="dlg-msg ${isPlayer ? 'dlg-player' : 'dlg-char'}">
+      <span class="dlg-msg-label">${isPlayer ? '👑 Вы' : _escHtml(charName)}</span>
+      <span class="dlg-msg-text">${_escHtml(m.text)}</span>
+    </div>`;
+  }).join('');
+
+  const natArg = nId ? `'${nId}'` : 'null';
+
+  return `
+    <div class="dlg-section">
+      <div class="dlg-section-header">
+        <span class="dlg-section-title">💬 Свободный разговор</span>
+        <span class="dlg-patience-bar" title="Терпение — при спаме или бессмыслице падает до 0, персонаж прекратит разговор">
+          <span style="font-size:10px;color:#aaa;">Терпение:</span>
+          <span class="dlg-patience-track">
+            <span class="dlg-patience-fill" style="width:${patience}%;background:${patienceColor}"></span>
+          </span>
+          <span style="font-size:10px;color:${patienceColor}">${patience}%</span>
+        </span>
+      </div>
+      <div class="dlg-history" id="dlg-history-${charId}">
+        ${historyHtml || '<div class="dlg-empty">Начните разговор — напишите что-нибудь ниже.</div>'}
+      </div>
+      <div class="dlg-input-row">
+        <textarea class="dlg-input" id="dlg-input-${charId}"
+          placeholder="Говорите с ${_escHtml(charName)}… (союз, подкуп, угроза, просьба — своими словами)"
+          rows="2" onkeydown="dlgHandleKey(event,'${charId}',${natArg})"></textarea>
+        <button class="dlg-send-btn" onclick="dlgSend('${charId}',${natArg})" title="Отправить (Enter)">➤</button>
+      </div>
+      <div class="dlg-status" id="dlg-status-${charId}"></div>
+    </div>`;
+}
 
 // Enter без Shift — отправить; Shift+Enter — перенос строки
 function dlgHandleKey(event, charId, nationId) {

@@ -295,6 +295,10 @@ function showCharacterDetail(charId) {
           ${char.history.slice(-3).reverse().map(h => `<div class="history-entry">Ход ${h.turn}: ${h.event}</div>`).join('')}
         </div>
       </div>` : ''}
+
+      ${typeof renderDialogueBlock === 'function'
+          ? renderDialogueBlock(char.id, char.name, GAME_STATE.player_nation)
+          : ''}
     </div>
   `;
 
