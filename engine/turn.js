@@ -52,6 +52,9 @@ async function processTurn() {
     checkCharacterDeaths();
     maybeSpawnCharacter();
 
+    // 3.5. Диалоговый движок — сжимаем горячую память персонажей
+    await DIALOGUE_ENGINE.tick(GAME_STATE.player_nation);
+
     // 4. AI нации — решения (Claude, параллельно)
     await processAINations();
 

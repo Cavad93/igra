@@ -1756,6 +1756,19 @@ function openSenatorCard(senatorId, nationId) {
     ...(s.hidden_interests   ?? []).map(i => `❓${i}`)
   ].join(', ') || '—';
 
+  // Определяем terпение и историю диалога персонажа для отображения
+  const charForChat = (nation.characters ?? []).find(c => c.id === s.id);
+  const patience    = charForChat?.dialogue?.patience_score ?? 100;
+  const patienceColor = patience > 60 ? '#4CAF50' : patience > 30 ? '#FF9800' : '#f44336';
+  const chatHistory = (charForChat?.dialogue?.hot_memory ?? []).slice(-10);
+  const chatHistoryHtml = chatHistory.map(m => {
+    const isPlayer = m.role === 'player';
+    return `<div class="dlg-msg ${isPlayer ? 'dlg-player' : 'dlg-char'}">
+      <span class="dlg-msg-label">${isPlayer ? '👑 Вы' : s.name}</span>
+      <span class="dlg-msg-text">${m.text}</span>
+    </div>`;
+  }).join('');
+
   const actionBtns = `
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
       <button style="background:${canBribe ? 'rgba(255,215,0,0.15)' : 'rgba(255,255,255,0.05)'};
@@ -1775,6 +1788,30 @@ function openSenatorCard(senatorId, nationId) {
     <div style="font-size:10px;color:#777;margin-top:5px;">
       Интересы: ${interests} · Здоровье: ${s.health_points ?? '?'} · Влияние: ${s.influence ?? '?'}
       ${isLeader ? ' · 👑 Лидер фракции' : ''}
+    </div>
+
+    <!-- ══ СВОБОДНЫЙ ДИАЛОГ ══ -->
+    <div class="dlg-section">
+      <div class="dlg-section-header">
+        <span class="dlg-section-title">💬 Свободный разговор</span>
+        <span class="dlg-patience-bar" title="Терпение персонажа">
+          <span style="font-size:10px;color:#aaa;">Терпение:</span>
+          <span class="dlg-patience-track">
+            <span class="dlg-patience-fill" style="width:${patience}%;background:${patienceColor}"></span>
+          </span>
+          <span style="font-size:10px;color:${patienceColor}">${patience}%</span>
+        </span>
+      </div>
+      <div class="dlg-history" id="dlg-history-${s.id}">
+        ${chatHistoryHtml || '<div class="dlg-empty">Начните разговор — напишите что-нибудь ниже.</div>'}
+      </div>
+      <div class="dlg-input-row">
+        <textarea class="dlg-input" id="dlg-input-${s.id}"
+          placeholder="Говорите с ${s.name}... (предложите союз, подкуп, угрозу — своими словами)"
+          rows="2" onkeydown="dlgHandleKey(event,'${s.id}','${nationId}')"></textarea>
+        <button class="dlg-send-btn" onclick="dlgSend('${s.id}','${nationId}')" title="Отправить (Enter)">➤</button>
+      </div>
+      <div class="dlg-status" id="dlg-status-${s.id}"></div>
     </div>
   `;
 
@@ -1923,4 +1960,82 @@ function submitSenateLaw(nationId) {
   };
 
   startSenateDebate(nationId, law, speech);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// СВОБОДНЫЙ ДИАЛОГ С ПЕРСОНАЖЕМ
+// ══════════════════════════════════════════════════════════════════════
+
+// Enter без Shift — отправить; Shift+Enter — перенос строки
+function dlgHandleKey(event, charId, nationId) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    dlgSend(charId, nationId);
+  }
+}
+
+async function dlgSend(charId, nationId) {
+  const input  = document.getElementById(`dlg-input-${charId}`);
+  const status = document.getElementById(`dlg-status-${charId}`);
+  const history = document.getElementById(`dlg-history-${charId}`);
+  if (!input || !status) return;
+
+  const text = input.value.trim();
+  if (!text) return;
+
+  // Блокируем кнопку на время запроса
+  input.disabled = true;
+  status.innerHTML = '<span class="dlg-thinking">⏳ Персонаж обдумывает ответ…</span>';
+
+  try {
+    const result = await DIALOGUE_ENGINE.processPlayerInput(charId, text, nationId);
+
+    // Добавляем реплики в DOM
+    if (history) {
+      // Удаляем плейсхолдер если есть
+      const empty = history.querySelector('.dlg-empty');
+      if (empty) empty.remove();
+
+      const playerDiv = document.createElement('div');
+      playerDiv.className = 'dlg-msg dlg-player';
+      playerDiv.innerHTML = `<span class="dlg-msg-label">👑 Вы</span><span class="dlg-msg-text">${_escHtml(text)}</span>`;
+      history.appendChild(playerDiv);
+
+      const charDiv = document.createElement('div');
+      charDiv.className = `dlg-msg dlg-char${result.blocked ? ' dlg-blocked' : ''}`;
+      const nation = GAME_STATE.nations[nationId ?? GAME_STATE.player_nation];
+      const char   = (nation?.characters ?? []).find(c => c.id === charId);
+      charDiv.innerHTML = `<span class="dlg-msg-label">${char?.name ?? '?'}</span><span class="dlg-msg-text">${_escHtml(result.reply ?? result.error ?? '…')}</span>`;
+      history.appendChild(charDiv);
+
+      // Скроллим вниз
+      history.scrollTop = history.scrollHeight;
+    }
+
+    // Статус-строка: эффекты
+    const effectLines = (result.effects ?? []).map(e => {
+      if (e.type === 'loyalty')    return `${e.delta > 0 ? '📈' : '📉'} Лояльность ${e.delta > 0 ? '+' : ''}${e.delta}`;
+      if (e.type === 'bribe_paid') return `💰 Выплачено ${e.amount} золота`;
+      if (e.type === 'tyranny')    return `👁 Тирания +${e.delta}`;
+      if (e.type === 'insult')     return `😤 Терпение −20`;
+      return '';
+    }).filter(Boolean);
+
+    const pColor = (result.patience ?? 100) > 60 ? '#4CAF50' : (result.patience ?? 100) > 30 ? '#FF9800' : '#f44336';
+    status.innerHTML = effectLines.length
+      ? `<span class="dlg-effects">${effectLines.join(' · ')}</span> <span style="color:${pColor}">Терпение: ${result.patience ?? 100}%</span>`
+      : `<span style="color:${pColor}">Терпение: ${result.patience ?? 100}%</span>`;
+
+    input.value = '';
+  } catch (err) {
+    console.error('[dlgSend]', err);
+    status.innerHTML = '<span style="color:#f44">Ошибка связи с персонажем.</span>';
+  } finally {
+    input.disabled = false;
+    input.focus();
+  }
+}
+
+function _escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
